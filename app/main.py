@@ -1,0 +1,80 @@
+"""FastAPI main application entrypoint."""
+
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.api.routes import admin_router, creators_router, health_router, streams_router
+from app.core.config import get_settings
+from app.core.exceptions import AppException
+from app.core.lifecycle import lifespan
+from app.core.logging import get_logger
+
+logger = get_logger("app.main")
+
+
+def create_application() -> FastAPI:
+    """Application factory for Goddess AI / AI-Modrator."""
+    settings = get_settings()
+
+    app = FastAPI(
+        title="Goddess AI / AI-Modrator",
+        description="Production-grade multi-channel YouTube Live AI Co-Host + AI Moderator foundation",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if not settings.is_production else None,
+        redoc_url="/redoc" if not settings.is_production else None,
+    )
+
+    # 1. CORS Middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # 2. Global Exception Handlers
+    @app.exception_handler(AppException)
+    async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+        logger.warning(
+            f"AppException on {request.method} {request.url.path}: {exc.message} (status: {exc.status_code})"
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "type": exc.__class__.__name__,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.error(
+            f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+            exc_info=True,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": {
+                    "type": "InternalServerError",
+                    "message": "An unexpected server error occurred.",
+                }
+            },
+        )
+
+    # 3. Include Routers
+    app.include_router(health_router)
+    app.include_router(creators_router)
+    app.include_router(streams_router)
+    app.include_router(admin_router)
+
+    return app
+
+
+app = create_application()
