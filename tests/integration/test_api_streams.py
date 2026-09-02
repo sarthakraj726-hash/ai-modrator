@@ -20,7 +20,9 @@ async def test_stream_connect_and_disconnect(client: AsyncClient, admin_headers:
         "youtube_video_id": "video_abc_123",
         "youtube_live_chat_id": "chat_xyz_789",
     }
-    connect_resp = await client.post("/streams/connect", json=connect_payload, headers=admin_headers)
+    connect_resp = await client.post(
+        "/streams/connect", json=connect_payload, headers=admin_headers
+    )
     assert connect_resp.status_code == 201
     stream_data = connect_resp.json()
     session_id = stream_data["id"]

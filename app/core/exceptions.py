@@ -59,7 +59,9 @@ class EntityAlreadyExistsError(AppException):
 class DatabaseError(AppException):
     """Raised on database failures."""
 
-    def __init__(self, message: str = "Database operation failed", details: dict[str, Any] | None = None):
+    def __init__(
+        self, message: str = "Database operation failed", details: dict[str, Any] | None = None
+    ):
         super().__init__(message=message, status_code=500, details=details)
 
 
@@ -95,6 +97,7 @@ class RateLimitExceededError(AppException):
 # ==============================================================================
 # YouTube Subsystem Exceptions
 # ==============================================================================
+
 
 class YouTubeAPIError(AppException):
     """Base exception for YouTube API interactions."""
@@ -136,6 +139,7 @@ class CircuitBreakerOpenError(AppException):
 # Stream Worker Exceptions
 # ==============================================================================
 
+
 class StreamSessionError(AppException):
     """Base exception for stream session workers."""
 
@@ -162,4 +166,22 @@ class StreamSessionAlreadyActiveError(StreamSessionError):
             message=f"Stream session '{session_id}' is already active and running",
             status_code=409,
             details={"session_id": session_id},
+        )
+
+
+class InvalidArgumentError(AppException):
+    """Raised when client input or parameter format is invalid."""
+
+    def __init__(self, message: str = "Invalid argument provided"):
+        super().__init__(message=message, status_code=400)
+
+
+class ExternalServiceError(AppException):
+    """Raised when an external third-party service fails."""
+
+    def __init__(self, service_name: str, message: str = "External service request failed"):
+        super().__init__(
+            message=f"{service_name}: {message}",
+            status_code=502,
+            details={"service_name": service_name, "error": message},
         )

@@ -9,13 +9,25 @@ from datetime import UTC, datetime
 from typing import Any
 
 # Context variables for distributed tracing and stream isolation
-correlation_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar("correlation_id", default=None)
-creator_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar("creator_id", default=None)
-stream_session_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar("stream_session_id", default=None)
+correlation_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "correlation_id", default=None
+)
+creator_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "creator_id", default=None
+)
+stream_session_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "stream_session_id", default=None
+)
 
 # Regular expressions for identifying and redacting sensitive data
 SENSITIVE_PATTERNS = [
-    (re.compile(r"(api[_-]?key|secret|password|token|authorization|bearer)[\"':=\s]+([^\s\"',&]+)", re.IGNORECASE), r"\1=[REDACTED]"),
+    (
+        re.compile(
+            r"(api[_-]?key|secret|password|token|authorization|bearer)[\"':=\s]+([^\s\"',&]+)",
+            re.IGNORECASE,
+        ),
+        r"\1=[REDACTED]",
+    ),
     (re.compile(r"(AIzaSy[A-Za-z0-9_-]{25,40})"), "[REDACTED_YOUTUBE_KEY]"),
     (re.compile(r"(sk-or-v1-[a-zA-Z0-9]{30,80})"), "[REDACTED_OPENROUTER_KEY]"),
 ]
@@ -82,7 +94,9 @@ class ConsoleLogFormatter(logging.Formatter):
         return f"{timestamp} [{record.levelname:<7}] {record.name}{corr_tag}{session_tag}: {msg}"
 
 
-def setup_logging(log_level: str = "INFO", app_env: str = "development", service_name: str = "ai-modrator") -> None:
+def setup_logging(
+    log_level: str = "INFO", app_env: str = "development", service_name: str = "ai-modrator"
+) -> None:
     """Configure root and application loggers with appropriate formatters."""
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level.upper())

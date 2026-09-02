@@ -22,7 +22,9 @@ class MockYouTubeClient(YouTubeClient):
             is_live=True,
         )
 
-    async def get_live_chat_messages(self, live_chat_id: str, page_token: str | None = None) -> YouTubeChatPage:
+    async def get_live_chat_messages(
+        self, live_chat_id: str, page_token: str | None = None
+    ) -> YouTubeChatPage:
         return YouTubeChatPage(
             messages=[],
             next_page_token="next_page",

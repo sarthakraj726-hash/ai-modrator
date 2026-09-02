@@ -51,12 +51,23 @@ async def test_youtube_client_resolve_and_chat_mocked():
     client = YouTubeClient(quota_manager=qm, key_pool=pool)
 
     # Override _request http client using mock transport
-    async def mocked_request(endpoint, params, quota_cost, method="GET", json_data=None):
-        reservation_id = await qm.reserve(units=quota_cost)
+    async def mocked_request(
+        endpoint,
+        params,
+        method_name="videos.list",
+        quota_cost=None,
+        http_method="GET",
+        json_data=None,
+        **kwargs,
+    ):
+        cost = quota_cost or 1
+        reservation_id = await qm.reserve(units=cost)
         key = await pool.get_available_key()
         transport = httpx.MockTransport(mock_handler)
         async with httpx.AsyncClient(transport=transport) as http_client:
-            resp = await http_client.get(f"https://www.googleapis.com/youtube/v3/{endpoint}", params={**params, "key": key})
+            resp = await http_client.get(
+                f"https://www.googleapis.com/youtube/v3/{endpoint}", params={**params, "key": key}
+            )
             data = resp.json()
             await qm.consume(reservation_id)
             return data

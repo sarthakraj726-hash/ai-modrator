@@ -11,7 +11,9 @@ from app.core.logging import (
 
 
 def test_secret_redactor():
-    secret_text = "Connecting with api_key=AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6 and password=supersecret"
+    secret_text = (
+        "Connecting with api_key=AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6 and password=supersecret"
+    )
     sanitized = redact_secrets(secret_text)
     assert "AIzaSy" not in sanitized or "[REDACTED" in sanitized
     assert "supersecret" not in sanitized

@@ -17,6 +17,7 @@ def get_utc_now() -> datetime:
 
 class BaseEvent(BaseModel):
     """Base schema for all domain and infrastructure events."""
+
     event_id: str = Field(default_factory=generate_event_id)
     event_type: str
     timestamp: datetime = Field(default_factory=get_utc_now)
@@ -30,6 +31,7 @@ class BaseEvent(BaseModel):
 # Creator Events
 # ==============================================================================
 
+
 class CreatorRegisteredEvent(BaseEvent):
     event_type: Literal["CreatorRegistered"] = "CreatorRegistered"
 
@@ -41,6 +43,7 @@ class CreatorUpdatedEvent(BaseEvent):
 # ==============================================================================
 # Stream Lifecycle Events
 # ==============================================================================
+
 
 class StreamConnectRequestedEvent(BaseEvent):
     event_type: Literal["StreamConnectRequested"] = "StreamConnectRequested"
@@ -67,8 +70,52 @@ class StreamErrorEvent(BaseEvent):
 
 
 # ==============================================================================
+# Phase 2: YouTube Discovery & Chat Events
+# ==============================================================================
+
+
+class YouTubeWebSubNotificationEvent(BaseEvent):
+    event_type: Literal["YouTubeWebSubNotification"] = "YouTubeWebSubNotification"
+    channel_id: str = ""
+    video_id: str = ""
+    title: str = ""
+    dedupe_hash: str = ""
+
+
+class ChatMessageReceivedEvent(BaseEvent):
+    event_type: Literal["ChatMessageReceived"] = "ChatMessageReceived"
+    message_id: str = ""
+    channel_id: str = ""
+    video_id: str = ""
+    live_chat_id: str = ""
+    author_channel_id: str = ""
+    author_display_name: str = ""
+    message_text: str = ""
+    is_moderator: bool = False
+    is_channel_owner: bool = False
+    is_member: bool = False
+    is_verified: bool = False
+
+
+class YouTubeKeyCooldownEvent(BaseEvent):
+    event_type: Literal["YouTubeKeyCooldown"] = "YouTubeKeyCooldown"
+    slot: str = ""
+    masked_key: str = ""
+    cooldown_seconds: int = 0
+    reason: str = ""
+
+
+class YouTubeQuotaWarningEvent(BaseEvent):
+    event_type: Literal["YouTubeQuotaWarning"] = "YouTubeQuotaWarning"
+    used_units: int = 0
+    daily_budget: int = 4000
+    percentage_used: float = 0.0
+
+
+# ==============================================================================
 # System Health & Alert Events
 # ==============================================================================
+
 
 class SystemWarningEvent(BaseEvent):
     event_type: Literal["SystemWarning"] = "SystemWarning"

@@ -21,7 +21,9 @@ async def test_openrouter_provider_http_mocked():
             },
         )
 
-    provider = OpenRouterProvider(api_key="sk-or-v1-validkey123456789012345678901234567890123456789012345678901234")
+    provider = OpenRouterProvider(
+        api_key="sk-or-v1-validkey123456789012345678901234567890123456789012345678901234"
+    )
 
     # Mock _call_model using MockTransport
     async def mocked_call_model(model, req):
@@ -31,6 +33,7 @@ async def test_openrouter_provider_http_mocked():
             data = resp.json()
             choice = data["choices"][0]["message"]["content"]
             from app.ai.models import CompletionResponse, TokenUsage
+
             return CompletionResponse(
                 content=choice,
                 model_used=model,
@@ -52,6 +55,7 @@ async def test_openrouter_provider_http_mocked():
 @pytest.mark.asyncio
 async def test_stream_service_not_found(db_session: AsyncSession):
     from app.core.exceptions import EntityNotFoundError
+
     s_service = StreamService(db_session)
     with pytest.raises(EntityNotFoundError):
         await s_service.get_stream("non-existent-session")
@@ -77,6 +81,7 @@ def test_console_logger_formatter():
     import logging
 
     from app.core.logging import ConsoleLogFormatter
+
     formatter = ConsoleLogFormatter()
     record = logging.LogRecord(
         name="test.console",
@@ -94,6 +99,7 @@ def test_console_logger_formatter():
 @pytest.mark.asyncio
 async def test_redis_ttl_and_expire():
     from app.cache.redis import InMemoryRedisFallback
+
     fallback = InMemoryRedisFallback()
     await fallback.set("test_key", "val", ex=10)
     assert await fallback.ttl("test_key") <= 10

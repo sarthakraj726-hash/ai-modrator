@@ -33,7 +33,9 @@ class AuditRepository(BaseRepository[AuditEvent]):
             payload=payload or {},
         )
 
-    async def list_by_stream(self, stream_session_id: str, limit: int = 100) -> Sequence[AuditEvent]:
+    async def list_by_stream(
+        self, stream_session_id: str, limit: int = 100
+    ) -> Sequence[AuditEvent]:
         """Fetch audit trail for a specific stream."""
         result = await self.session.execute(
             select(AuditEvent)

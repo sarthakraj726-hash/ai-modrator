@@ -29,6 +29,7 @@ from app.youtube.models import YouTubeChatPage, YouTubeStreamInfo
 
 class FaultyRedisFallback(InMemoryRedisFallback):
     """Redis fallback that simulates network partitions and connection drops."""
+
     def __init__(self):
         super().__init__()
         self.is_broken = False
@@ -108,9 +109,13 @@ async def test_chaos_duplicate_stream_connect_rejection():
 async def test_chaos_graceful_shutdown_under_active_load():
     class FastClient(YouTubeClient):
         async def resolve_stream_info(self, video_id: str) -> YouTubeStreamInfo:
-            return YouTubeStreamInfo(video_id=video_id, channel_id="c", is_live=True, live_chat_id="chat_fast")
+            return YouTubeStreamInfo(
+                video_id=video_id, channel_id="c", is_live=True, live_chat_id="chat_fast"
+            )
 
-        async def get_live_chat_messages(self, live_chat_id: str, page_token: str | None = None) -> YouTubeChatPage:
+        async def get_live_chat_messages(
+            self, live_chat_id: str, page_token: str | None = None
+        ) -> YouTubeChatPage:
             return YouTubeChatPage(messages=[], polling_interval_millis=10)
 
     manager = WorkerManager(youtube_client=FastClient())

@@ -86,3 +86,57 @@ async def delete_creator(
     admin: AdminUserDep,
 ) -> None:
     await service.delete_creator(creator_id, actor_id=admin.user_id)
+
+
+@router.post(
+    "/{creator_id}/websub/subscribe",
+    summary="Subscribe creator channel to YouTube WebSub hub",
+)
+async def subscribe_creator_websub(
+    creator_id: str,
+    service: CreatorServiceDep,
+    admin: AdminUserDep,
+    callback_url: str = "https://goddess-ai.up.railway.app/webhooks/youtube/websub",
+) -> dict[str, str]:
+    from app.youtube.websub.manager import get_websub_manager
+
+    creator = await service.get_creator(creator_id)
+    manager = get_websub_manager()
+    await manager.subscribe_channel(
+        creator_id=creator.id,
+        channel_id=creator.youtube_channel_id,
+        callback_url=callback_url,
+        db_session=service.session,
+    )
+    return {
+        "status": "subscription_requested",
+        "creator_id": creator.id,
+        "channel_id": creator.youtube_channel_id,
+        "callback_url": callback_url,
+    }
+
+
+@router.post(
+    "/{creator_id}/websub/unsubscribe",
+    summary="Unsubscribe creator channel from YouTube WebSub hub",
+)
+async def unsubscribe_creator_websub(
+    creator_id: str,
+    service: CreatorServiceDep,
+    admin: AdminUserDep,
+    callback_url: str = "https://goddess-ai.up.railway.app/webhooks/youtube/websub",
+) -> dict[str, str]:
+    from app.youtube.websub.manager import get_websub_manager
+
+    creator = await service.get_creator(creator_id)
+    manager = get_websub_manager()
+    success = await manager.unsubscribe_channel(
+        channel_id=creator.youtube_channel_id,
+        callback_url=callback_url,
+        db_session=service.session,
+    )
+    return {
+        "status": "unsubscribed" if success else "failed",
+        "creator_id": creator.id,
+        "channel_id": creator.youtube_channel_id,
+    }

@@ -72,7 +72,10 @@ class EventBus:
                 else:
                     handler(event)
             except Exception as e:
-                logger.error(f"Error invoking event handler '{handler.__name__}' for '{type_name}': {e}", exc_info=True)
+                logger.error(
+                    f"Error invoking event handler '{handler.__name__}' for '{type_name}': {e}",
+                    exc_info=True,
+                )
 
     async def _safe_execute(self, handler: EventHandler, event: BaseEvent) -> None:
         try:

@@ -44,7 +44,9 @@ class IsolatedSimulatedYouTubeClient(YouTubeClient):
             is_live=True,
         )
 
-    async def get_live_chat_messages(self, live_chat_id: str, page_token: str | None = None) -> YouTubeChatPage:
+    async def get_live_chat_messages(
+        self, live_chat_id: str, page_token: str | None = None
+    ) -> YouTubeChatPage:
         # Check if fault injection is armed for this specific chat
         if live_chat_id in self.should_crash_chat:
             raise RuntimeError(f"FATAL INJECTED CRASH in chat: {live_chat_id}")
@@ -102,7 +104,9 @@ async def test_six_stream_concurrency_and_isolation():
     # Verify all 6 streams are RUNNING and actively receiving their own messages
     for key in stream_keys:
         sess = sessions[key]
-        assert sess.state == WorkerState.RUNNING, f"Stream {key} should be RUNNING, got {sess.state}"
+        assert sess.state == WorkerState.RUNNING, (
+            f"Stream {key} should be RUNNING, got {sess.state}"
+        )
         assert sess.messages_processed > 0, f"Stream {key} should have processed messages"
         assert len(received_messages_by_stream[f"session_{key}"]) > 0
 

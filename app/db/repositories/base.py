@@ -29,9 +29,10 @@ class BaseRepository(Generic[ModelType]):
         result = await self.session.execute(query)
         return result.scalars().all()
 
-    async def create(self, **kwargs: Any) -> ModelType:
-        """Instantiate and persist a new model instance."""
-        instance = self.model(**kwargs)
+    async def create(self, instance: ModelType | None = None, **kwargs: Any) -> ModelType:
+        """Instantiate and persist a new model instance, or persist an existing instance."""
+        if instance is None:
+            instance = self.model(**kwargs)
         self.session.add(instance)
         await self.session.flush()
         return instance

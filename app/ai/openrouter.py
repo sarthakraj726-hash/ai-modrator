@@ -70,7 +70,9 @@ class OpenRouterProvider(AIProvider):
             try:
                 return await self._call_model(model, request)
             except Exception as e:
-                logger.warning(f"OpenRouter model '{model}' generation failed: {e}. Trying fallback...")
+                logger.warning(
+                    f"OpenRouter model '{model}' generation failed: {e}. Trying fallback..."
+                )
                 last_exception = e
 
         raise RuntimeError(f"All OpenRouter model candidates failed. Last error: {last_exception}")

@@ -10,6 +10,7 @@ from app.db.base import Base, TimestampMixin, generate_uuid
 if TYPE_CHECKING:
     from app.db.models.audit_event import AuditEvent
     from app.db.models.stream_session import StreamSession
+    from app.db.models.websub_subscription import WebSubSubscription
 
 
 class Creator(Base, TimestampMixin):
@@ -44,6 +45,11 @@ class Creator(Base, TimestampMixin):
     )
     audit_events: Mapped[list["AuditEvent"]] = relationship(
         "AuditEvent",
+        back_populates="creator",
+        cascade="all, delete-orphan",
+    )
+    websub_subscriptions: Mapped[list["WebSubSubscription"]] = relationship(
+        "WebSubSubscription",
         back_populates="creator",
         cascade="all, delete-orphan",
     )

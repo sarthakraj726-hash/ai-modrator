@@ -8,11 +8,12 @@ from pydantic import BaseModel, Field
 
 class ModerationLayer(IntEnum):
     """5-Layer Progressive Enforcement Hierarchy."""
-    LAYER_1_LIGHT_WARNING = 1           # Friendly public / private reminder
-    LAYER_2_WARNING_AND_DELETE = 2      # Delete offending message + clear warning
-    LAYER_3_SHORT_TIMEOUT = 3           # 60s - 300s timeout + direct notice
-    LAYER_4_EXTENDED_TIMEOUT = 4        # 30m - 1hr extended mute
-    LAYER_5_HIDE_BAN = 5                # Permanent channel block / hide user
+
+    LAYER_1_LIGHT_WARNING = 1  # Friendly public / private reminder
+    LAYER_2_WARNING_AND_DELETE = 2  # Delete offending message + clear warning
+    LAYER_3_SHORT_TIMEOUT = 3  # 60s - 300s timeout + direct notice
+    LAYER_4_EXTENDED_TIMEOUT = 4  # 30m - 1hr extended mute
+    LAYER_5_HIDE_BAN = 5  # Permanent channel block / hide user
 
 
 class ModerationAction(str, Enum):
@@ -46,6 +47,7 @@ class ModerationDecision(BaseModel):
 
 class ReviewItem(BaseModel):
     """Item queued for human-in-the-loop review."""
+
     item_id: str
     stream_session_id: str
     creator_id: str

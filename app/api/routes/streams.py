@@ -1,6 +1,6 @@
 """Stream session lifecycle management API routes."""
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 
 from app.api.dependencies import AdminUserDep, StreamServiceDep
 from app.api.schemas.stream import StreamConnectRequest, StreamSessionResponse
@@ -19,12 +19,24 @@ async def connect_stream(
     service: StreamServiceDep,
     admin: AdminUserDep,
 ) -> StreamSessionResponse:
-    session_record = await service.connect_stream(
-        creator_id=payload.creator_id,
-        youtube_video_id=payload.youtube_video_id,
-        youtube_live_chat_id=payload.youtube_live_chat_id,
-        actor_id=admin.user_id,
-    )
+    if payload.youtube_live_url:
+        session_record = await service.connect_stream_by_url(
+            youtube_live_url=payload.youtube_live_url,
+            creator_id=payload.creator_id,
+            actor_id=admin.user_id,
+        )
+    elif payload.creator_id and payload.youtube_video_id:
+        session_record = await service.connect_stream(
+            creator_id=payload.creator_id,
+            youtube_video_id=payload.youtube_video_id,
+            youtube_live_chat_id=payload.youtube_live_chat_id,
+            actor_id=admin.user_id,
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either 'youtube_live_url' or both 'creator_id' and 'youtube_video_id' must be provided.",
+        )
     return StreamSessionResponse.model_validate(session_record)
 
 
@@ -54,6 +66,18 @@ async def restart_stream(
 ) -> StreamSessionResponse:
     session_record = await service.restart_stream(session_id, actor_id=admin.user_id)
     return StreamSessionResponse.model_validate(session_record)
+
+
+@router.get(
+    "",
+    response_model=list[StreamSessionResponse],
+    summary="List all stream sessions",
+)
+async def list_all_streams(
+    service: StreamServiceDep,
+) -> list[StreamSessionResponse]:
+    sessions = await service.list_active()
+    return [StreamSessionResponse.model_validate(s) for s in sessions]
 
 
 @router.get(

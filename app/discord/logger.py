@@ -35,7 +35,9 @@ class DiscordLogger:
         self._creator_channels[creator_id] = discord_channel_id
         logger.info(f"Mapped creator {creator_id} to Discord log channel {discord_channel_id}")
 
-    async def log_creator_event(self, creator_id: str, message: str, title: str = "Stream Event") -> bool:
+    async def log_creator_event(
+        self, creator_id: str, message: str, title: str = "Stream Event"
+    ) -> bool:
         """Send a creator log notification to creator's designated Discord channel."""
         channel_id = self._creator_channels.get(creator_id)
         if not channel_id:
@@ -49,7 +51,9 @@ class DiscordLogger:
             )
         )
 
-    async def send_developer_alert(self, message: str, severity: str = "ERROR", mention: bool = False) -> bool:
+    async def send_developer_alert(
+        self, message: str, severity: str = "ERROR", mention: bool = False
+    ) -> bool:
         """Send high-priority alert to developer Discord channel."""
         if not self.dev_channel_id:
             logger.debug("No Discord dev channel ID configured")
@@ -70,7 +74,9 @@ class DiscordLogger:
     async def _send_message(self, payload: DiscordMessagePayload) -> bool:
         """Internal dispatch over Discord HTTP webhook/bot API or simulated logger."""
         if not self.bot_token or not payload.channel_id:
-            logger.info(f"[DiscordLog simulated -> channel:{payload.channel_id}]: {payload.content}")
+            logger.info(
+                f"[DiscordLog simulated -> channel:{payload.channel_id}]: {payload.content}"
+            )
             return True
 
         # When bot token is configured, post to Discord API

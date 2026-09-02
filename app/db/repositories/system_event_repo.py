@@ -33,7 +33,9 @@ class SystemEventRepository(BaseRepository[SystemEvent]):
             metadata_payload=metadata_payload or {},
         )
 
-    async def list_recent(self, limit: int = 50, severity: SystemSeverity | None = None) -> Sequence[SystemEvent]:
+    async def list_recent(
+        self, limit: int = 50, severity: SystemSeverity | None = None
+    ) -> Sequence[SystemEvent]:
         """Fetch recent system events, optionally filtered by severity."""
         query = select(SystemEvent)
         if severity:

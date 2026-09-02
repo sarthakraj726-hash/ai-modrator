@@ -4,7 +4,14 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import admin_router, creators_router, health_router, streams_router
+from app.api.routes import (
+    admin_router,
+    creators_router,
+    health_router,
+    streams_router,
+    webhooks_router,
+    youtube_router,
+)
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.lifecycle import lifespan
@@ -73,6 +80,8 @@ def create_application() -> FastAPI:
     app.include_router(creators_router)
     app.include_router(streams_router)
     app.include_router(admin_router)
+    app.include_router(webhooks_router)
+    app.include_router(youtube_router)
 
     return app
 

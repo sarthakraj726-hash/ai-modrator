@@ -47,7 +47,9 @@ async def retry_with_backoff(
                 raise
 
             # Check if exception type is explicitly non-retryable
-            if retryable_exceptions is not None and not isinstance(exc, tuple(retryable_exceptions)):
+            if retryable_exceptions is not None and not isinstance(
+                exc, tuple(retryable_exceptions)
+            ):
                 raise
 
             attempt += 1

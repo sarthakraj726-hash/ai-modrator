@@ -22,13 +22,17 @@ class WorkerManager:
     Ensures absolute lifecycle isolation between streams.
     """
 
-    def __init__(self, youtube_client: YouTubeClient | None = None):
+    def __init__(self, youtube_client: YouTubeClient | None = None) -> None:
         self.youtube_client = youtube_client
         self._sessions: dict[str, StreamWorkerSession] = {}
-        self._on_message_handler: Callable[[str, YouTubeChatMessage], Coroutine[Any, Any, None]] | None = None
+        self._on_message_handler: (
+            Callable[[str, YouTubeChatMessage], Coroutine[Any, Any, None]] | None
+        ) = None
         self._lock = asyncio.Lock()
 
-    def set_message_handler(self, handler: Callable[[str, YouTubeChatMessage], Coroutine[Any, Any, None]]) -> None:
+    def set_message_handler(
+        self, handler: Callable[[str, YouTubeChatMessage], Coroutine[Any, Any, None]]
+    ) -> None:
         """Register global chat message consumer hook."""
         self._on_message_handler = handler
 
@@ -38,7 +42,10 @@ class WorkerManager:
         creator_id: str,
         video_id: str,
         live_chat_id: str | None = None,
+        youtube_client: YouTubeClient | None = None,
         custom_client: YouTubeClient | None = None,
+        on_message_handler: Callable[[str, YouTubeChatMessage], Coroutine[Any, Any, None]]
+        | None = None,
         error_threshold: int = 3,
         base_error_backoff: float = 0.05,
     ) -> StreamWorkerSession:
@@ -48,16 +55,24 @@ class WorkerManager:
         """
         async with self._lock:
             existing = self._sessions.get(session_id)
-            if existing and existing.state in (WorkerState.RUNNING, WorkerState.STARTING):
+            if existing and existing.state in (
+                WorkerState.STARTING,
+                WorkerState.RUNNING,
+                WorkerState.RESOLVING,
+                WorkerState.RECONNECTING,
+            ):
                 raise StreamSessionAlreadyActiveError(session_id)
+
+            client = youtube_client or custom_client or self.youtube_client
+            handler = on_message_handler or self._on_message_handler
 
             session = StreamWorkerSession(
                 session_id=session_id,
                 creator_id=creator_id,
                 video_id=video_id,
                 live_chat_id=live_chat_id,
-                youtube_client=custom_client or self.youtube_client,
-                on_message_handler=self._on_message_handler,
+                youtube_client=client,
+                on_message_handler=handler,
                 error_threshold=error_threshold,
                 base_error_backoff=base_error_backoff,
             )
@@ -83,6 +98,7 @@ class WorkerManager:
         video_id = session.video_id
         live_chat_id = session.live_chat_id
         client = session.youtube_client
+        handler = session.on_message_handler
 
         await session.stop(timeout=timeout)
         return await self.start_session(
@@ -90,16 +106,21 @@ class WorkerManager:
             creator_id=creator_id,
             video_id=video_id,
             live_chat_id=live_chat_id,
-            custom_client=client,
+            youtube_client=client,
+            on_message_handler=handler,
         )
 
     async def get_session(self, session_id: str) -> StreamWorkerSession:
-        """Retrieve worker session instance by ID."""
+        """Retrieve worker session instance by ID or raise StreamSessionNotFoundError."""
         async with self._lock:
             session = self._sessions.get(session_id)
             if not session:
                 raise StreamSessionNotFoundError(session_id)
             return session
+
+    def get_session_sync(self, session_id: str) -> StreamWorkerSession | None:
+        """Synchronously check if session exists."""
+        return self._sessions.get(session_id)
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         """Return diagnostic snapshots of all registered sessions."""

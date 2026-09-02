@@ -87,6 +87,7 @@ async def reset_singletons():
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Provide an asynchronous HTTP test client wired to test database session."""
+
     async def override_get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 

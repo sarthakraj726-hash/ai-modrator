@@ -20,9 +20,11 @@ class CreatorRepository(BaseRepository[Creator]):
         )
         return result.scalars().first()
 
+    async def get_by_channel_id(self, channel_id: str) -> Creator | None:
+        """Alias for get_by_youtube_channel_id."""
+        return await self.get_by_youtube_channel_id(channel_id)
+
     async def list_enabled(self) -> Sequence[Creator]:
         """List all currently enabled creators."""
-        result = await self.session.execute(
-            select(Creator).where(Creator.enabled.is_(True))
-        )
+        result = await self.session.execute(select(Creator).where(Creator.enabled.is_(True)))
         return result.scalars().all()

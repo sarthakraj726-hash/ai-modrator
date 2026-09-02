@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class Role(str, Enum):
     """User roles defining system-wide or channel-level access levels."""
+
     DEVELOPER = "DEVELOPER"
     CREATOR = "CREATOR"
     MODERATOR = "MODERATOR"
@@ -71,6 +72,7 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
 
 class UserContext(BaseModel):
     """Context object representing the authenticated identity."""
+
     user_id: str
     role: Role
     creator_id: str | None = None  # None for developers, set for channel-scoped creators/moderators

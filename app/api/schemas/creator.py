@@ -6,8 +6,12 @@ from pydantic import BaseModel, Field
 
 
 class CreatorCreate(BaseModel):
-    youtube_channel_id: str = Field(..., min_length=3, max_length=64, description="YouTube Channel ID")
-    channel_name: str = Field(..., min_length=1, max_length=255, description="Human-readable channel title")
+    youtube_channel_id: str = Field(
+        ..., min_length=3, max_length=64, description="YouTube Channel ID"
+    )
+    channel_name: str = Field(
+        ..., min_length=1, max_length=255, description="Human-readable channel title"
+    )
     enabled: bool = True
 
 

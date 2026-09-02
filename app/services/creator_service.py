@@ -58,7 +58,9 @@ class CreatorService:
             )
         )
 
-        logger.info(f"Registered new creator '{channel_name}' ({youtube_channel_id}) with ID {creator.id}")
+        logger.info(
+            f"Registered new creator '{channel_name}' ({youtube_channel_id}) with ID {creator.id}"
+        )
         return creator
 
     async def get_creator(self, creator_id: str) -> Creator:

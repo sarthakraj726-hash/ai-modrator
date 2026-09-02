@@ -32,17 +32,24 @@ class StreamRepository(BaseRepository[StreamSession]):
         return result.scalars().all()
 
     async def list_active(self) -> Sequence[StreamSession]:
-        """List all stream sessions in active or connecting status."""
+        """List all stream sessions in active, running, or connecting status."""
         result = await self.session.execute(
             select(StreamSession).where(
-                StreamSession.status.in_([
-                    StreamStatus.ACTIVE.value,
-                    StreamStatus.CONNECTING.value,
-                    StreamStatus.RECONNECTING.value,
-                ])
+                StreamSession.status.in_(
+                    [
+                        StreamStatus.ACTIVE.value,
+                        StreamStatus.RUNNING.value,
+                        StreamStatus.CONNECTING.value,
+                        StreamStatus.RECONNECTING.value,
+                    ]
+                )
             )
         )
         return result.scalars().all()
+
+    async def list_active_sessions(self) -> Sequence[StreamSession]:
+        """Alias for list_active."""
+        return await self.list_active()
 
     async def update_status(
         self,

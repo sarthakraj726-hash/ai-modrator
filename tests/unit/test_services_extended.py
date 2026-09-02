@@ -85,7 +85,9 @@ async def test_stream_repository_methods(db_session: AsyncSession):
     assert updated.status == StreamStatus.RECONNECTING.value
 
     # non-existent update_status returns None
-    none_res = await s_service.stream_repo.update_status("non-existent-session-id", status=StreamStatus.ERROR)
+    none_res = await s_service.stream_repo.update_status(
+        "non-existent-session-id", status=StreamStatus.ERROR
+    )
     assert none_res is None
 
 

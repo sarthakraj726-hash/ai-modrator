@@ -43,7 +43,11 @@ async def test_admin_system_events_and_audits(client: AsyncClient, admin_headers
 
     stream_resp = await client.post(
         "/streams/connect",
-        json={"creator_id": creator_id, "youtube_video_id": "v_audit_1", "youtube_live_chat_id": "c_audit_1"},
+        json={
+            "creator_id": creator_id,
+            "youtube_video_id": "v_audit_1",
+            "youtube_live_chat_id": "c_audit_1",
+        },
         headers=admin_headers,
     )
     session_id = stream_resp.json()["id"]

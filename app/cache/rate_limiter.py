@@ -21,7 +21,9 @@ class RateLimiter:
         current_window = int(time.time() // window_seconds)
         return f"{self.key_prefix}:{identifier}:{current_window}"
 
-    async def is_allowed(self, identifier: str, max_requests: int, window_seconds: int = 60) -> bool:
+    async def is_allowed(
+        self, identifier: str, max_requests: int, window_seconds: int = 60
+    ) -> bool:
         """Check whether request is allowed within rate limit window."""
         redis = await get_redis_client()
         key = self._get_key(identifier, window_seconds)
@@ -39,7 +41,9 @@ class RateLimiter:
         if not allowed:
             raise RateLimitExceededError(retry_after_seconds=window_seconds)
 
-    async def get_remaining(self, identifier: str, max_requests: int, window_seconds: int = 60) -> int:
+    async def get_remaining(
+        self, identifier: str, max_requests: int, window_seconds: int = 60
+    ) -> int:
         """Return the number of remaining allowed requests in current window."""
         redis = await get_redis_client()
         key = self._get_key(identifier, window_seconds)

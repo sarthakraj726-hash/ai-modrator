@@ -11,14 +11,21 @@ from app.db.base import Base, TimestampMixin, generate_uuid
 
 if TYPE_CHECKING:
     from app.db.models.audit_event import AuditEvent
+    from app.db.models.chat_checkpoint import YouTubeChatCheckpoint
     from app.db.models.creator import Creator
 
 
 class StreamStatus(str, Enum):
     IDLE = "IDLE"
+    RESOLVING = "RESOLVING"
     CONNECTING = "CONNECTING"
+    CONNECTED = "CONNECTED"
+    RUNNING = "RUNNING"
     ACTIVE = "ACTIVE"
     RECONNECTING = "RECONNECTING"
+    DEGRADED = "DEGRADED"
+    STOPPING = "STOPPING"
+    STOPPED = "STOPPED"
     ERROR = "ERROR"
     ENDED = "ENDED"
 
@@ -74,6 +81,12 @@ class StreamSession(Base, TimestampMixin):
         "AuditEvent",
         back_populates="stream_session",
         cascade="all, delete-orphan",
+    )
+    checkpoint: Mapped["YouTubeChatCheckpoint | None"] = relationship(
+        "YouTubeChatCheckpoint",
+        back_populates="stream_session",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
 
     __table_args__ = (

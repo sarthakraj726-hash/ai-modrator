@@ -13,8 +13,8 @@ logger = get_logger("app.utils.circuit_breaker")
 
 
 class CircuitState(str, Enum):
-    CLOSED = "CLOSED"      # Normal operation, requests pass through
-    OPEN = "OPEN"          # Failing, fast-reject all requests
+    CLOSED = "CLOSED"  # Normal operation, requests pass through
+    OPEN = "OPEN"  # Failing, fast-reject all requests
     HALF_OPEN = "HALF_OPEN"  # Testing canary requests after cooldown
 
 
@@ -66,7 +66,9 @@ class CircuitBreaker:
             if self.state == CircuitState.HALF_OPEN:
                 self.consecutive_success_count += 1
                 if self.consecutive_success_count >= self.half_open_max_attempts:
-                    logger.info(f"Circuit '{self.name}' recovered. Transitioning from HALF_OPEN to CLOSED.")
+                    logger.info(
+                        f"Circuit '{self.name}' recovered. Transitioning from HALF_OPEN to CLOSED."
+                    )
                     self.state = CircuitState.CLOSED
                     self.failure_count = 0
                     self.consecutive_success_count = 0
@@ -86,7 +88,9 @@ class CircuitBreaker:
                     f"Failures: {self.failure_count}. Last error: {exception}"
                 )
 
-    async def execute(self, coro_func: Callable[..., Coroutine[Any, Any, Any]], *args: Any, **kwargs: Any) -> Any:
+    async def execute(
+        self, coro_func: Callable[..., Coroutine[Any, Any, Any]], *args: Any, **kwargs: Any
+    ) -> Any:
         """Execute a coroutine wrapped within the circuit breaker boundary."""
         if not await self.can_execute():
             remaining = max(0.0, self.open_until - time.time())
