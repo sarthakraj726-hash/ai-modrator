@@ -2,6 +2,7 @@
 
 from app.api.routes.admin import router as admin_router
 from app.api.routes.ai import router as ai_router
+from app.api.routes.commands import router as commands_router
 from app.api.routes.creators import router as creators_router
 from app.api.routes.health import router as health_router
 from app.api.routes.moderation import router as moderation_router
@@ -18,4 +19,5 @@ __all__ = [
     "youtube_router",
     "ai_router",
     "moderation_router",
+    "commands_router",
 ]

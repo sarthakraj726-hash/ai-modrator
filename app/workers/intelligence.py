@@ -6,13 +6,19 @@ from app.ai.budget import AIBudgetManager, get_ai_budget_manager
 from app.ai.models import ChatMessage, ChatRole, ModelTier
 from app.ai.openrouter import get_ai_provider
 from app.ai.provider import AIProvider
+from app.commands.engine import ProductionCommandEngine
+from app.commands.models import CommandExecutionContext
 from app.core.logging import get_logger
+from app.core.rbac import Role
+from app.db.session import get_session_factory
+from app.engagement.xp import XPManager
 from app.events.bus import EventBus, get_event_bus
 from app.events.schemas import (
     ChatMessageReceivedEvent,
     StreamEndedEvent,
     StreamStartedEvent,
 )
+from app.games.engine import MiniGameEngine
 from app.moderation.actions import YouTubeModerationActionService, get_action_service
 from app.moderation.engine import get_moderation_engine
 from app.moderation.interface import ModerationEngine
@@ -36,7 +42,8 @@ class StreamIntelligenceCoordinator:
     """
     Coordinates real-time intelligence for all active stream sessions.
     Subscribes to live chat events, enforces 5-layer moderation,
-    evaluates co-host triggers, and delivers persona-aligned replies.
+    executes Phase 4 commands / games / XP, evaluates co-host triggers,
+    and delivers persona-aligned replies.
     """
 
     def __init__(
@@ -47,6 +54,10 @@ class StreamIntelligenceCoordinator:
         ai_provider: AIProvider | None = None,
         action_service: YouTubeModerationActionService | None = None,
         budget_manager: AIBudgetManager | None = None,
+        command_engine: ProductionCommandEngine | None = None,
+        xp_manager: XPManager | None = None,
+        game_engine: MiniGameEngine | None = None,
+        session_factory: Any | None = None,
     ) -> None:
         self.event_bus = event_bus or get_event_bus()
         self.moderation_engine = moderation_engine or get_moderation_engine()
@@ -55,6 +66,17 @@ class StreamIntelligenceCoordinator:
         self.action_service = action_service or get_action_service()
         self.budget_manager = budget_manager or get_ai_budget_manager()
         self.context_engine = StreamContextEngine()
+
+        self.xp_manager = xp_manager or XPManager()
+        self.game_engine = game_engine or MiniGameEngine(self.xp_manager)
+        self.command_engine = command_engine or ProductionCommandEngine(
+            persona_engine=self.persona_engine
+            if isinstance(self.persona_engine, HonneyPersonaEngine)
+            else None,
+            xp_manager=self.xp_manager,
+            game_engine=self.game_engine,
+        )
+        self.session_factory = session_factory or get_session_factory()
 
         # Per-stream recent message sliding history: stream_id -> list of texts
         self._recent_chat_history: dict[str, list[str]] = {}
@@ -138,10 +160,66 @@ class StreamIntelligenceCoordinator:
                     author_channel_id=author_id,
                     decision=decision,
                 )
-            # Moderated messages do not trigger co-host chat responses
-            return
+        # 3. Phase 4: Command Engine & Engagement Processing
+        if self.session_factory:
+            async with self.session_factory() as session:
+                # 3a. Check if message is a command
+                if self.command_engine.is_command(text):
+                    cmd_name, args = self.command_engine.parse_command(text)
+                    author_role = (
+                        Role.CREATOR
+                        if event.is_channel_owner
+                        else Role.MODERATOR
+                        if event.is_moderator
+                        else Role.VIEWER
+                    )
+                    cmd_ctx = CommandExecutionContext(
+                        command_name=cmd_name,
+                        args=args,
+                        raw_text=text,
+                        creator_id=creator_id,
+                        stream_session_id=session_id,
+                        author=yt_msg.author,
+                        author_role=author_role,
+                        live_chat_id=event.live_chat_id,
+                    )
+                    cmd_result = await self.command_engine.execute_command(
+                        context=cmd_ctx,
+                        session=session,
+                        profile=self.get_creator_persona(creator_id),
+                    )
+                    await session.commit()
+                    if cmd_result.response_message:
+                        logger.info(
+                            f"[Command Reply to @{author_name}]: {cmd_result.response_message}"
+                        )
+                    return
 
-        # 3. Check Co-Host Response Triggers
+                # 3b. Evaluate active mini-game guess
+                won, win_announcement = await self.game_engine.evaluate_chat_guess(
+                    session=session,
+                    creator_id=creator_id,
+                    stream_session_id=session_id,
+                    viewer_channel_id=author_id,
+                    viewer_display_name=author_name,
+                    chat_text=text,
+                )
+                if won and win_announcement:
+                    await session.commit()
+                    logger.info(f"[Mini-Game Win]: {win_announcement}")
+                    return
+
+                # 3c. Anti-Farming XP Award
+                await self.xp_manager.process_chat_message(
+                    session=session,
+                    creator_id=creator_id,
+                    viewer_channel_id=author_id,
+                    display_name=author_name,
+                    message_text=text,
+                )
+                await session.commit()
+
+        # 4. Check Co-Host Response Triggers
         trigger_type, keyword = ResponseTriggerEngine.evaluate_trigger(
             text=text,
             stream_session_id=session_id,

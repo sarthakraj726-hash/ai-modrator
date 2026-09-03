@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import (
     admin_router,
     ai_router,
+    commands_router,
     creators_router,
     health_router,
     moderation_router,
@@ -86,6 +87,7 @@ def create_application() -> FastAPI:
     app.include_router(youtube_router)
     app.include_router(ai_router)
     app.include_router(moderation_router)
+    app.include_router(commands_router)
 
     return app
 
