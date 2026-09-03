@@ -127,3 +127,21 @@ class SystemErrorEvent(BaseEvent):
 
 class SystemCriticalEvent(BaseEvent):
     event_type: Literal["SystemCritical"] = "SystemCritical"
+
+
+EVENT_TYPE_MAP: dict[str, type[BaseEvent]] = {
+    "CreatorRegistered": CreatorRegisteredEvent,
+    "CreatorUpdated": CreatorUpdatedEvent,
+    "StreamConnectRequested": StreamConnectRequestedEvent,
+    "StreamConnected": StreamConnectedEvent,
+    "StreamDisconnected": StreamDisconnectedEvent,
+    "StreamStarted": StreamStartedEvent,
+    "StreamEnded": StreamEndedEvent,
+    "StreamError": StreamErrorEvent,
+    "ChatMessageReceived": ChatMessageReceivedEvent,
+    "YouTubeKeyCooldown": YouTubeKeyCooldownEvent,
+    "YouTubeQuotaWarning": YouTubeQuotaWarningEvent,
+    "SystemWarning": SystemWarningEvent,
+    "SystemError": SystemErrorEvent,
+    "SystemCritical": SystemCriticalEvent,
+}

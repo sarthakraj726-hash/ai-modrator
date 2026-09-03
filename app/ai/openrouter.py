@@ -248,6 +248,100 @@ class OpenRouterProvider(AIProvider):
         except Exception:
             return False
 
+    async def check_readiness(self) -> dict[str, Any]:
+        """
+        Evaluate AI provider readiness without consuming generation tokens:
+        - Checks configuration & credential presence
+        - Checks circuit breaker status
+        - Checks lightweight endpoint reachability
+        Distinguishes: CONFIG_MISSING, PROVIDER_UNREACHABLE, DEGRADED, READY.
+        """
+        import time
+
+        if not self.api_key or not self.api_key.strip():
+            return {
+                "status": "CONFIG_MISSING",
+                "ready": False,
+                "latency_ms": 0.0,
+                "circuit_breaker_open": self.circuit_breaker.is_open,
+                "primary_model": self.settings.OPENROUTER_MODEL_PRIMARY,
+                "fallback_model": self.settings.OPENROUTER_MODEL_FALLBACK,
+                "message": "OpenRouter API key not configured",
+            }
+
+        if self.circuit_breaker.is_open:
+            return {
+                "status": "DEGRADED",
+                "ready": False,
+                "latency_ms": 0.0,
+                "circuit_breaker_open": True,
+                "primary_model": self.settings.OPENROUTER_MODEL_PRIMARY,
+                "fallback_model": self.settings.OPENROUTER_MODEL_FALLBACK,
+                "message": "OpenRouter circuit breaker is tripped/open",
+            }
+
+        if self.settings.is_testing:
+            return {
+                "status": "READY",
+                "ready": True,
+                "latency_ms": 1.0,
+                "circuit_breaker_open": False,
+                "primary_model": self.settings.OPENROUTER_MODEL_PRIMARY,
+                "fallback_model": self.settings.OPENROUTER_MODEL_FALLBACK,
+                "message": "Provider operational (testing mode)",
+            }
+
+        start = time.perf_counter()
+        try:
+            client = self._get_client()
+            resp = await client.get(
+                f"{self.base_url}/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=3.0,
+            )
+            latency_ms = (time.perf_counter() - start) * 1000
+            if resp.status_code == 200:
+                return {
+                    "status": "READY",
+                    "ready": True,
+                    "latency_ms": round(latency_ms, 2),
+                    "circuit_breaker_open": False,
+                    "primary_model": self.settings.OPENROUTER_MODEL_PRIMARY,
+                    "fallback_model": self.settings.OPENROUTER_MODEL_FALLBACK,
+                    "message": "OpenRouter API connection verified",
+                }
+            elif resp.status_code in (401, 403):
+                return {
+                    "status": "DEGRADED",
+                    "ready": False,
+                    "latency_ms": round(latency_ms, 2),
+                    "circuit_breaker_open": False,
+                    "primary_model": self.settings.OPENROUTER_MODEL_PRIMARY,
+                    "fallback_model": self.settings.OPENROUTER_MODEL_FALLBACK,
+                    "message": f"Authentication rejected by OpenRouter (HTTP {resp.status_code})",
+                }
+            else:
+                return {
+                    "status": "DEGRADED",
+                    "ready": False,
+                    "latency_ms": round(latency_ms, 2),
+                    "circuit_breaker_open": False,
+                    "primary_model": self.settings.OPENROUTER_MODEL_PRIMARY,
+                    "fallback_model": self.settings.OPENROUTER_MODEL_FALLBACK,
+                    "message": f"OpenRouter returned HTTP {resp.status_code}",
+                }
+        except Exception as e:
+            latency_ms = (time.perf_counter() - start) * 1000
+            return {
+                "status": "PROVIDER_UNREACHABLE",
+                "ready": False,
+                "latency_ms": round(latency_ms, 2),
+                "circuit_breaker_open": self.circuit_breaker.is_open,
+                "primary_model": self.settings.OPENROUTER_MODEL_PRIMARY,
+                "fallback_model": self.settings.OPENROUTER_MODEL_FALLBACK,
+                "message": f"Connection to OpenRouter failed: {e}",
+            }
+
 
 _global_ai_provider: AIProvider | None = None
 

@@ -18,9 +18,15 @@ class Settings(BaseSettings):
     # Application Environment
     APP_ENV: Literal["development", "production", "testing"] = "development"
     APP_NAME: str = "goddess-ai-modrator"
+    APP_SERVICE_MODE: Literal["unified", "api", "worker"] = "unified"
     LOG_LEVEL: str = "INFO"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+
+    # Continuous Health & Reliability
+    HEALTH_CHECK_INTERVAL_SECONDS: int = Field(default=30, ge=5, le=300)
+    HEALTH_CHECK_TIMEOUT_SECONDS: float = Field(default=5.0, ge=1.0, le=30.0)
+    DISCORD_RETRY_QUEUE_MAX_SIZE: int = Field(default=1000, ge=50)
 
     # Security & Admin Access
     ADMIN_SECRET: str = Field(
@@ -98,6 +104,18 @@ class Settings(BaseSettings):
     @property
     def is_testing(self) -> bool:
         return self.APP_ENV == "testing"
+
+    @property
+    def is_api_service(self) -> bool:
+        return self.APP_SERVICE_MODE in ("unified", "api")
+
+    @property
+    def is_worker_service(self) -> bool:
+        return self.APP_SERVICE_MODE in ("unified", "worker")
+
+    @property
+    def is_unified_service(self) -> bool:
+        return self.APP_SERVICE_MODE == "unified"
 
 
 @lru_cache(maxsize=1)

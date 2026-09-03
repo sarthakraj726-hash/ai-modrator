@@ -42,28 +42,69 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Redis unavailable, falling back to in-memory mode: {e}")
 
-    # 3. Initialize Worker Manager
-    worker_manager = get_worker_manager()
-    logger.info("Stream worker manager initialized")
+    # 3. Initialize Distributed EventBus
+    from app.events.bus import get_event_bus
 
-    # 4. Initialize Stream Intelligence Coordinator
-    from app.workers.intelligence import get_intelligence_coordinator
+    event_bus = get_event_bus()
+    if not settings.is_unified_service:
+        try:
+            await event_bus.start_distributed_listener()
+            logger.info("EventBus distributed Redis listener started")
+        except Exception as e:
+            logger.warning(f"Failed to start EventBus distributed listener: {e}")
 
-    coordinator = get_intelligence_coordinator()
-    await coordinator.start()
-    logger.info("Stream intelligence coordinator initialized")
+    # 4. Initialize Worker Manager (Only in Worker or Unified Mode)
+    worker_manager = None
+    if settings.is_worker_service:
+        worker_manager = get_worker_manager()
+        logger.info(f"Stream worker manager initialized (mode: {settings.APP_SERVICE_MODE})")
+
+        from app.workers.intelligence import get_intelligence_coordinator
+
+        coordinator = get_intelligence_coordinator()
+        await coordinator.start()
+        logger.info("Stream intelligence coordinator initialized")
+    else:
+        logger.info(
+            "API mode active: Stream workers bypassed to prevent duplicate worker execution"
+        )
+
+    # 5. Initialize Continuous Health Monitor Supervisor
+    from app.services.health_monitor import get_health_supervisor
+
+    health_supervisor = get_health_supervisor()
+    try:
+        await health_supervisor.start()
+        logger.info("Continuous HealthMonitorSupervisor started")
+    except Exception as e:
+        logger.error(f"Failed to start HealthMonitorSupervisor: {e}")
 
     yield
 
     # Shutdown Phase
     logger.info("Initiating graceful application shutdown...")
 
-    # Stop all active stream sessions
+    # Stop Health Monitor Supervisor
     try:
-        await worker_manager.stop_all()
-        logger.info("All active stream worker sessions stopped cleanly")
+        await health_supervisor.stop()
+        logger.info("HealthMonitorSupervisor stopped")
     except Exception as e:
-        logger.error(f"Error stopping stream workers during shutdown: {e}")
+        logger.error(f"Error stopping health supervisor: {e}")
+
+    # Stop EventBus Distributed Listener
+    try:
+        await event_bus.stop_distributed_listener()
+        logger.info("EventBus listener stopped")
+    except Exception as e:
+        logger.error(f"Error stopping EventBus listener: {e}")
+
+    # Stop stream sessions if workers were running
+    if worker_manager:
+        try:
+            await worker_manager.stop_all()
+            logger.info("All active stream worker sessions stopped cleanly")
+        except Exception as e:
+            logger.error(f"Error stopping stream workers during shutdown: {e}")
 
     # Close Redis client
     try:

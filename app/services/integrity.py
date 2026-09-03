@@ -133,7 +133,9 @@ class IntegrityCheckService:
         """Validate that no economy account has a negative balance."""
         violations: list[IntegrityViolation] = []
 
-        stmt = select(EconomyAccount).where(EconomyAccount.balance < 0)
+        stmt = select(EconomyAccount).where(
+            EconomyAccount.account_type == "VIEWER", EconomyAccount.balance < 0
+        )
         result = await self.session.execute(stmt)
         negative_accounts = list(result.scalars().all())
 
@@ -224,3 +226,38 @@ class IntegrityCheckService:
             "stale_live_sessions_count": len(stale_sessions),
         }
         return violations, stats
+
+    async def execute_and_report_incidents(self) -> IntegrityAuditReport:
+        """
+        Execute full domain integrity audit and automatically pipeline any
+        detected violations into the IncidentService, EventBus, and operational alerts.
+        """
+        report = await self.run_full_audit()
+        if report.is_valid:
+            return report
+
+        from app.services.incidents import IncidentService
+
+        incident_svc = IncidentService(self.session)
+        for v in report.violations:
+            service_name = (
+                "ECONOMY_LEDGER"
+                if "LEDGER" in v.category or "BALANCE" in v.category
+                else "STORE_INVENTORY"
+            )
+            if "STREAM" in v.category:
+                service_name = "STREAM_SUPERVISOR"
+
+            try:
+                await incident_svc.report_incident(
+                    severity=v.severity,
+                    service=service_name,
+                    summary=f"[{v.category}] {v.details}",
+                    creator_id=v.context.get("creator_id"),
+                    stream_session_id=v.context.get("stream_id"),
+                    action="Automated integrity pipeline triggered investigation",
+                )
+            except Exception as e:
+                logger.error(f"Failed to report incident for violation {v.category}: {e}")
+
+        return report

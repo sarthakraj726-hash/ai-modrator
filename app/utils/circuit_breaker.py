@@ -43,9 +43,13 @@ class CircuitBreaker:
         self.state = CircuitState.CLOSED
         self.failure_count = 0
         self.consecutive_success_count = 0
-        self.last_state_change = time.time()
         self.open_until = 0.0
         self._lock = asyncio.Lock()
+
+    @property
+    def is_open(self) -> bool:
+        """Return True if circuit is currently in OPEN state."""
+        return self.state == CircuitState.OPEN
 
     async def can_execute(self) -> bool:
         """Check if request is permitted under current circuit state."""

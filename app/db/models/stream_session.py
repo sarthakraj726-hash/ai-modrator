@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 
 class StreamStatus(str, Enum):
+    REQUESTED = "REQUESTED"
+    VALIDATING = "VALIDATING"
     IDLE = "IDLE"
     RESOLVING = "RESOLVING"
     CONNECTING = "CONNECTING"
@@ -28,8 +30,131 @@ class StreamStatus(str, Enum):
     DEGRADED = "DEGRADED"
     STOPPING = "STOPPING"
     STOPPED = "STOPPED"
-    ERROR = "ERROR"
+    ENDING = "ENDING"
     ENDED = "ENDED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    ERROR = "ERROR"
+
+
+LEGAL_STREAM_TRANSITIONS: dict[str, set[str]] = {
+    StreamStatus.IDLE.value: {
+        StreamStatus.REQUESTED.value,
+        StreamStatus.VALIDATING.value,
+        StreamStatus.CONNECTING.value,
+        StreamStatus.RESOLVING.value,
+        StreamStatus.STOPPED.value,
+        StreamStatus.CANCELLED.value,
+    },
+    StreamStatus.REQUESTED.value: {
+        StreamStatus.VALIDATING.value,
+        StreamStatus.CANCELLED.value,
+        StreamStatus.FAILED.value,
+    },
+    StreamStatus.VALIDATING.value: {
+        StreamStatus.RESOLVING.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.CANCELLED.value,
+    },
+    StreamStatus.RESOLVING.value: {
+        StreamStatus.CONNECTING.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.CANCELLED.value,
+    },
+    StreamStatus.CONNECTING.value: {
+        StreamStatus.CONNECTED.value,
+        StreamStatus.ACTIVE.value,
+        StreamStatus.RUNNING.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.CANCELLED.value,
+    },
+    StreamStatus.CONNECTED.value: {
+        StreamStatus.ACTIVE.value,
+        StreamStatus.RUNNING.value,
+        StreamStatus.DEGRADED.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.ENDING.value,
+        StreamStatus.ENDED.value,
+    },
+    StreamStatus.RUNNING.value: {
+        StreamStatus.ACTIVE.value,
+        StreamStatus.RECONNECTING.value,
+        StreamStatus.DEGRADED.value,
+        StreamStatus.ENDING.value,
+        StreamStatus.ENDED.value,
+        StreamStatus.STOPPING.value,
+        StreamStatus.STOPPED.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.ERROR.value,
+    },
+    StreamStatus.ACTIVE.value: {
+        StreamStatus.RECONNECTING.value,
+        StreamStatus.DEGRADED.value,
+        StreamStatus.ENDING.value,
+        StreamStatus.ENDED.value,
+        StreamStatus.STOPPING.value,
+        StreamStatus.STOPPED.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.ERROR.value,
+    },
+    StreamStatus.RECONNECTING.value: {
+        StreamStatus.ACTIVE.value,
+        StreamStatus.RUNNING.value,
+        StreamStatus.DEGRADED.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.ENDING.value,
+        StreamStatus.ENDED.value,
+        StreamStatus.STOPPED.value,
+        StreamStatus.ERROR.value,
+    },
+    StreamStatus.DEGRADED.value: {
+        StreamStatus.ACTIVE.value,
+        StreamStatus.RUNNING.value,
+        StreamStatus.RECONNECTING.value,
+        StreamStatus.ENDING.value,
+        StreamStatus.ENDED.value,
+        StreamStatus.FAILED.value,
+        StreamStatus.STOPPED.value,
+    },
+    StreamStatus.ENDING.value: {
+        StreamStatus.ENDED.value,
+        StreamStatus.STOPPED.value,
+        StreamStatus.FAILED.value,
+    },
+    StreamStatus.STOPPING.value: {
+        StreamStatus.STOPPED.value,
+        StreamStatus.ENDED.value,
+        StreamStatus.FAILED.value,
+    },
+    StreamStatus.STOPPED.value: {
+        StreamStatus.REQUESTED.value,
+        StreamStatus.CONNECTING.value,
+        StreamStatus.ACTIVE.value,
+    },
+    StreamStatus.FAILED.value: {
+        StreamStatus.REQUESTED.value,
+        StreamStatus.CONNECTING.value,
+        StreamStatus.ACTIVE.value,
+    },
+    StreamStatus.ERROR.value: {
+        StreamStatus.REQUESTED.value,
+        StreamStatus.CONNECTING.value,
+        StreamStatus.ACTIVE.value,
+    },
+    StreamStatus.ENDED.value: {
+        StreamStatus.REQUESTED.value,
+        StreamStatus.CONNECTING.value,
+    },
+    StreamStatus.CANCELLED.value: set(),
+}
+
+
+def validate_stream_transition(current_status: str, target_status: str) -> bool:
+    """Validate whether the transition from current_status to target_status is legal."""
+    if current_status == target_status:
+        return True
+    allowed = LEGAL_STREAM_TRANSITIONS.get(current_status, set())
+    return target_status in allowed
 
 
 class StreamSession(Base, TimestampMixin):

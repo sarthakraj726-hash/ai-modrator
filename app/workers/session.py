@@ -30,15 +30,21 @@ logger = get_logger("app.workers.session")
 
 class WorkerState(str, Enum):
     IDLE = "IDLE"
+    REQUESTED = "REQUESTED"
+    VALIDATING = "VALIDATING"
     STARTING = "STARTING"
-    CONNECTING = "STARTING"
+    CONNECTING = "CONNECTING"
     RESOLVING = "RESOLVING"
     RUNNING = "RUNNING"
+    ACTIVE = "ACTIVE"
     RECONNECTING = "RECONNECTING"
     DEGRADED = "DEGRADED"
     STOPPING = "STOPPING"
     STOPPED = "STOPPED"
+    ENDING = "ENDING"
     ENDED = "ENDED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
     ERROR = "ERROR"
 
 

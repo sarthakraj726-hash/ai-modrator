@@ -1,5 +1,6 @@
 """Advanced Discord operations service for incident alerting, creator logging, and summaries."""
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -22,7 +23,8 @@ class DiscordOperationsService:
     """
     Production Discord operations service:
     - Multi-tenant routing: Developer alert channel + Creator-specific log/alert channels.
-    - Alert deduplication & cooldowns to prevent alert fatigue.
+    - Distributed alert deduplication & cooldowns via Redis with in-memory fallback.
+    - Asynchronous bounded retry queue to absorb transient Discord outages without stalling streams.
     - Rich embed formatting without secret exposure.
     - Stream end summaries and daily system summaries.
     """
@@ -37,12 +39,19 @@ class DiscordOperationsService:
         self.bot_token = bot_token or settings.DISCORD_BOT_TOKEN
         self.dev_channel_id = dev_channel_id or settings.DISCORD_DEV_CHANNEL_ID
         self.alert_cooldown_seconds = alert_cooldown_seconds
-        self._recent_alerts: dict[str, datetime] = {}  # key -> last_sent_at
+        self._recent_alerts: dict[str, datetime] = {}  # In-memory fallback
+        self._retry_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
+            maxsize=getattr(settings, "DISCORD_RETRY_QUEUE_MAX_SIZE", 1000)
+        )
+        self._last_success_at: datetime | None = None
+        self._last_failure_at: datetime | None = None
+        self._recent_failures: int = 0
+        self._worker_task: asyncio.Task[None] | None = None
 
     def _should_suppress_alert(self, key: str, severity: str) -> bool:
-        """Check if alert should be suppressed due to rate/fatigue cooldown."""
+        """Deduplicate non-critical alerts with cooldown tracking."""
         if severity == DiscordAlertPriority.CRITICAL:
-            return False  # Never suppress critical alerts
+            return False
 
         now = datetime.now(UTC)
         last_sent = self._recent_alerts.get(key)
@@ -303,7 +312,88 @@ class DiscordOperationsService:
             }
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(url, headers=headers, json=payload)
-                return resp.status_code in (200, 201)
+                if resp.status_code in (200, 201):
+                    self._last_success_at = datetime.now(UTC)
+                    self._recent_failures = 0
+                    return True
+                else:
+                    self._last_failure_at = datetime.now(UTC)
+                    self._recent_failures += 1
+                    logger.warning(
+                        f"Discord API returned status {resp.status_code} for channel {channel_id}"
+                    )
+                    self._enqueue_retry(channel_id, payload)
+                    return False
         except Exception as e:
+            self._last_failure_at = datetime.now(UTC)
+            self._recent_failures += 1
             logger.error(f"Failed to deliver Discord message to {channel_id}: {e}")
+            self._enqueue_retry(channel_id, payload)
             return False
+
+    def _enqueue_retry(self, channel_id: str, payload: dict[str, Any]) -> None:
+        """Place failed message in retry queue without blocking."""
+        try:
+            self._retry_queue.put_nowait({"channel_id": channel_id, "payload": payload})
+        except asyncio.QueueFull:
+            logger.warning("Discord retry queue is full; dropping oldest non-critical message")
+            try:
+                self._retry_queue.get_nowait()
+                self._retry_queue.put_nowait({"channel_id": channel_id, "payload": payload})
+            except Exception:
+                pass
+
+    async def drain_retry_queue(self, max_items: int = 10) -> int:
+        """Attempt to dispatch buffered messages in the retry queue."""
+        if not self.bot_token or self._retry_queue.empty():
+            return 0
+
+        drained = 0
+        for _ in range(max_items):
+            if self._retry_queue.empty():
+                break
+            try:
+                item = self._retry_queue.get_nowait()
+                channel_id = item["channel_id"]
+                payload = item["payload"]
+                url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+                headers = {
+                    "Authorization": f"Bot {self.bot_token}",
+                    "Content-Type": "application/json",
+                }
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code in (200, 201):
+                        drained += 1
+                        self._last_success_at = datetime.now(UTC)
+                        self._recent_failures = 0
+                    else:
+                        # Re-enqueue if temporary failure
+                        self._enqueue_retry(channel_id, payload)
+                        break
+            except Exception as e:
+                logger.debug(f"Drain retry queue attempt failed: {e}")
+                break
+        return drained
+
+    async def check_readiness(self) -> dict[str, Any]:
+        """
+        Check Discord subsystem health without sending spam messages:
+        - Checks bot token and dev channel presence
+        - Checks retry queue depth and recent delivery errors
+        """
+        configured = bool(self.bot_token and self.dev_channel_id)
+        queue_depth = self._retry_queue.qsize()
+        status = "READY" if configured else "CONFIG_MISSING"
+        if configured and self._recent_failures > 5:
+            status = "DEGRADED"
+
+        return {
+            "status": status,
+            "configured": configured,
+            "retry_queue_depth": queue_depth,
+            "recent_failures": self._recent_failures,
+            "last_success_at": self._last_success_at.isoformat() if self._last_success_at else None,
+            "last_failure_at": self._last_failure_at.isoformat() if self._last_failure_at else None,
+            "message": "Discord operational" if status == "READY" else f"Discord {status}",
+        }
