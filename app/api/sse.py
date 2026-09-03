@@ -1,6 +1,7 @@
-"""Event-driven Server-Sent Events (SSE) broadcaster with bounded buffers and client lifecycle management."""
+"""Event-driven Server-Sent Events (SSE) broadcaster with bounded buffers, client lifecycle management, and Last-Event-ID replay."""
 
 import asyncio
+import collections
 import json
 import uuid
 from collections.abc import AsyncGenerator
@@ -18,13 +19,23 @@ class SSEBroadcaster:
     """
     Manages real-time SSE fanout to developer control center clients.
     Subscribes to the EventBus, formats events according to SSE specification,
+    maintains a bounded chronological replay buffer for Last-Event-ID recovery,
     enforces bounded per-client buffers, and handles client disconnect cleanup.
     """
 
-    def __init__(self, max_buffer_per_client: int = 100, heartbeat_interval: float = 15.0):
+    def __init__(
+        self,
+        max_buffer_per_client: int = 100,
+        heartbeat_interval: float = 15.0,
+        replay_buffer_size: int = 500,
+    ):
         self.max_buffer_per_client = max_buffer_per_client
         self.heartbeat_interval = heartbeat_interval
+        self.replay_buffer_size = replay_buffer_size
         self._clients: dict[str, asyncio.Queue[dict[str, Any]]] = {}
+        self._replay_buffer: collections.deque[dict[str, Any]] = collections.deque(
+            maxlen=replay_buffer_size
+        )
         self._lock = asyncio.Lock()
         self._subscribed = False
 
@@ -38,10 +49,7 @@ class SSEBroadcaster:
         logger.info("SSEBroadcaster subscribed to domain EventBus")
 
     async def _handle_event(self, event: BaseEvent) -> None:
-        """Receive domain event and fan out to all active SSE client queues."""
-        if not self._clients:
-            return
-
+        """Receive domain event, store in replay buffer, and fan out to all active SSE client queues."""
         payload = {
             "id": event.event_id,
             "event": event.event_type,
@@ -52,7 +60,12 @@ class SSEBroadcaster:
         }
 
         async with self._lock:
+            # Append to bounded replay buffer
+            self._replay_buffer.append(payload)
             client_ids = list(self._clients.keys())
+
+        if not client_ids:
+            return
 
         for cid in client_ids:
             q = self._clients.get(cid)
@@ -87,12 +100,37 @@ class SSEBroadcaster:
         """Return count of currently connected SSE clients."""
         return len(self._clients)
 
+    async def get_replay_events(self, last_event_id: str) -> list[dict[str, Any]]:
+        """
+        Return all events that occurred chronologically after last_event_id.
+        Returns empty list if last_event_id is unknown or at the head of the buffer.
+        """
+        async with self._lock:
+            buffer_items = list(self._replay_buffer)
+
+        # Locate last_event_id in buffer
+        found_idx = -1
+        for idx, item in enumerate(buffer_items):
+            if item.get("id") == last_event_id:
+                found_idx = idx
+                break
+
+        if found_idx == -1:
+            logger.debug(
+                f"Last-Event-ID '{last_event_id}' not found in replay buffer (stale or unknown)"
+            )
+            return []
+
+        # Return all events strictly after last_event_id
+        return buffer_items[found_idx + 1 :]
+
     async def client_event_generator(
         self,
         last_event_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Yield SSE formatted messages to client until disconnected.
+        Replays missed events if last_event_id is provided and known.
         Emits periodic heartbeats to detect connection drops.
         """
         self.setup_eventbus_subscription()
@@ -112,12 +150,29 @@ class SSEBroadcaster:
         }
         yield f"id: {initial_msg['id']}\nevent: {initial_msg['event']}\ndata: {initial_msg['data']}\n\n"
 
+        replayed_ids: set[str] = set()
+
+        # Replay missed events if Last-Event-ID was supplied
+        if last_event_id and last_event_id.strip():
+            missed_events = await self.get_replay_events(last_event_id.strip())
+            for evt in missed_events:
+                eid = evt.get("id", "")
+                replayed_ids.add(eid)
+                event_type = evt.get("event", "message")
+                data_str = json.dumps(evt.get("data", {}))
+                yield f"id: {eid}\nevent: {event_type}\ndata: {data_str}\n\n"
+
         try:
             while True:
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=self.heartbeat_interval)
-                    event_type = msg.get("event", "message")
                     event_id = msg.get("id", str(uuid.uuid4()))
+                    # Avoid delivering duplicate event if it was already replayed
+                    if event_id in replayed_ids:
+                        replayed_ids.discard(event_id)
+                        continue
+
+                    event_type = msg.get("event", "message")
                     data_str = json.dumps(msg.get("data", {}))
                     yield f"id: {event_id}\nevent: {event_type}\ndata: {data_str}\n\n"
                 except TimeoutError:

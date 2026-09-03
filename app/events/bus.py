@@ -40,6 +40,10 @@ class EventBus:
         self.events_received_remote: int = 0
         self.last_published_at: datetime | None = None
         self.last_received_at: datetime | None = None
+        self.last_listener_error: str | None = None
+        self.consecutive_listener_failures: int = 0
+        self.last_success_at: datetime | None = None
+        self.last_failure_at: datetime | None = None
 
     def _extract_type_name(self, event_type: str | type[BaseEvent]) -> str:
         if isinstance(event_type, str):
@@ -152,12 +156,20 @@ class EventBus:
             try:
                 redis = await get_redis_client()
                 if not redis or getattr(redis, "_is_fallback", False):
+                    self.consecutive_listener_failures += 1
+                    self.last_failure_at = datetime.now(UTC)
+                    self.last_listener_error = "Redis transport unavailable or fallback active"
                     await asyncio.sleep(2.0)
                     continue
 
                 pubsub = redis.pubsub()
                 pattern = f"{self.channel_prefix}:*"
                 await pubsub.psubscribe(pattern)
+
+                # Successfully subscribed
+                self.consecutive_listener_failures = 0
+                self.last_success_at = datetime.now(UTC)
+                self.last_listener_error = None
 
                 while not self._stop_event.is_set():
                     message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
@@ -196,6 +208,9 @@ class EventBus:
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                self.consecutive_listener_failures += 1
+                self.last_failure_at = datetime.now(UTC)
+                self.last_listener_error = str(e)
                 logger.debug(f"EventBus distributed listener loop error: {e}")
                 await asyncio.sleep(2.0)
             finally:
@@ -211,23 +226,58 @@ class EventBus:
             self._all_subscribers
         )
         settings = get_settings()
-        mode = "DISTRIBUTED" if not settings.is_unified_service else "UNIFIED"
+        is_unified = settings.is_unified_service
+        mode = "UNIFIED" if is_unified else "DECOUPLED"
+
+        listener_active = bool(self._listener_task and not self._listener_task.done())
+
+        # In UNIFIED mode, EventBus is local in-memory dispatch and always operational
+        if is_unified:
+            status = "HEALTHY"
+            transport_available = True
+        else:
+            # In DECOUPLED mode, check Redis transport availability and listener task state
+            from app.cache.redis import get_redis_sync
+
+            redis_cli = get_redis_sync()
+            is_fallback = getattr(redis_cli, "_is_fallback", False)
+            transport_available = not is_fallback
+
+            if listener_active and transport_available and self.consecutive_listener_failures == 0:
+                status = "HEALTHY"
+            elif (
+                not transport_available
+                or not listener_active
+                or self.consecutive_listener_failures > 3
+            ):
+                status = (
+                    "UNHEALTHY"
+                    if (not listener_active or self.consecutive_listener_failures > 5)
+                    else "DEGRADED"
+                )
+            else:
+                status = "DEGRADED"
 
         return {
-            "status": "HEALTHY",
+            "status": status,
             "mode": mode,
             "instance_id": self.instance_id,
             "subscribers_registered": total_subscribers,
             "topics_count": len(self._subscribers),
             "events_published": self.events_published,
             "events_received_remote": self.events_received_remote,
-            "listener_active": bool(self._listener_task and not self._listener_task.done()),
+            "listener_active": listener_active,
+            "transport_available": transport_available,
             "last_published_at": self.last_published_at.isoformat()
             if self.last_published_at
             else None,
             "last_received_at": self.last_received_at.isoformat()
             if self.last_received_at
             else None,
+            "last_listener_error": self.last_listener_error,
+            "consecutive_listener_failures": self.consecutive_listener_failures,
+            "last_success_at": self.last_success_at.isoformat() if self.last_success_at else None,
+            "last_failure_at": self.last_failure_at.isoformat() if self.last_failure_at else None,
         }
 
     def clear(self) -> None:

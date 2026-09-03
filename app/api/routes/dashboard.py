@@ -91,6 +91,7 @@ class FeatureFlagUpdateRequest(BaseModel):
     key: str
     enabled: bool
     creator_id: str | None = None
+    stream_session_id: str | None = None
     environment: str = "all"
     reason: str | None = None
 
@@ -845,6 +846,7 @@ async def update_feature_flag(
         key=req.key,
         enabled=req.enabled,
         creator_id=req.creator_id,
+        stream_session_id=req.stream_session_id,
         environment=req.environment,
         actor_id=admin.user_id,
         reason=req.reason,
@@ -853,6 +855,7 @@ async def update_feature_flag(
         "key": flag.key,
         "enabled": flag.enabled,
         "creator_id": flag.creator_id,
+        "stream_session_id": flag.stream_session_id,
         "environment": flag.environment,
     }
 

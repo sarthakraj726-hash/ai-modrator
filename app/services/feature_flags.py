@@ -28,10 +28,10 @@ DEFAULT_FLAGS: dict[str, bool] = {
 class FeatureFlagService:
     """
     Cascading feature flag evaluator:
-    1. Stream override (if specified)
-    2. Creator override (creator_id matching)
-    3. Environment override (matching settings.APP_ENV)
-    4. Global override (environment='all', creator_id=None)
+    1. Stream override (stream_session_id matching)
+    2. Creator override (creator_id matching, stream_session_id=None)
+    3. Environment override (matching settings.APP_ENV, creator_id=None, stream_session_id=None)
+    4. Global override (environment='all', creator_id=None, stream_session_id=None)
     5. Hardcoded conservative default
     """
 
@@ -44,9 +44,14 @@ class FeatureFlagService:
         self,
         flag_key: str,
         creator_id: str | None = None,
+        stream_session_id: str | None = None,
         default: bool | None = None,
     ) -> bool:
-        """Evaluate whether a feature flag is enabled for the current context."""
+        """
+        Evaluate whether a feature flag is enabled for the current context.
+        Hierarchy:
+        STREAM -> CREATOR -> ENVIRONMENT -> GLOBAL -> DEFAULT
+        """
         key_upper = flag_key.upper()
 
         # Query all active flags for this key
@@ -57,23 +62,34 @@ class FeatureFlagService:
         if not flags:
             return default if default is not None else DEFAULT_FLAGS.get(key_upper, True)
 
-        # 1. Creator-specific override for current environment or all
+        # 1. Stream override (highest precedence)
+        if stream_session_id:
+            for f in flags:
+                if f.stream_session_id == stream_session_id:
+                    return f.enabled
+
+        # 2. Creator-specific override for current environment or all
         if creator_id:
             for f in flags:
-                if f.creator_id == creator_id and f.environment in (
-                    self.settings.APP_ENV,
-                    "all",
+                if (
+                    f.creator_id == creator_id
+                    and f.stream_session_id is None
+                    and f.environment in (self.settings.APP_ENV, "all")
                 ):
                     return f.enabled
 
-        # 2. Environment-specific override (e.g. production vs development)
+        # 3. Environment-specific override (e.g. production vs development)
         for f in flags:
-            if f.creator_id is None and f.environment == self.settings.APP_ENV:
+            if (
+                f.creator_id is None
+                and f.stream_session_id is None
+                and f.environment == self.settings.APP_ENV
+            ):
                 return f.enabled
 
-        # 3. Global override
+        # 4. Global override
         for f in flags:
-            if f.creator_id is None and f.environment == "all":
+            if f.creator_id is None and f.stream_session_id is None and f.environment == "all":
                 return f.enabled
 
         return default if default is not None else DEFAULT_FLAGS.get(key_upper, True)
@@ -83,6 +99,7 @@ class FeatureFlagService:
         key: str,
         enabled: bool,
         creator_id: str | None = None,
+        stream_session_id: str | None = None,
         environment: str = "all",
         actor_id: str = "SYSTEM",
         reason: str | None = None,
@@ -92,6 +109,7 @@ class FeatureFlagService:
         stmt = select(FeatureFlag).where(
             FeatureFlag.key == key_upper,
             FeatureFlag.creator_id == creator_id,
+            FeatureFlag.stream_session_id == stream_session_id,
             FeatureFlag.environment == environment,
         )
         res = await self.session.execute(stmt)
@@ -106,6 +124,7 @@ class FeatureFlagService:
                 key=key_upper,
                 enabled=enabled,
                 creator_id=creator_id,
+                stream_session_id=stream_session_id,
                 environment=environment,
                 description=reason or f"Feature flag {key_upper}",
             )
@@ -123,12 +142,13 @@ class FeatureFlagService:
                 "key": key_upper,
                 "previous_state": old_state,
                 "new_state": enabled,
+                "stream_session_id": stream_session_id,
                 "environment": environment,
                 "reason": reason,
             },
         )
         logger.info(
-            f"FeatureFlag '{key_upper}' set to {enabled} (creator: {creator_id}, env: {environment}) by {actor_id}"
+            f"FeatureFlag '{key_upper}' set to {enabled} (creator: {creator_id}, stream: {stream_session_id}, env: {environment}) by {actor_id}"
         )
         return flag_obj
 
@@ -143,6 +163,7 @@ class FeatureFlagService:
                 "key": r.key,
                 "enabled": r.enabled,
                 "creator_id": r.creator_id,
+                "stream_session_id": r.stream_session_id,
                 "environment": r.environment,
                 "description": r.description,
             }

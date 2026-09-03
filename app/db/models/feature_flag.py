@@ -40,6 +40,12 @@ class FeatureFlag(Base, TimestampMixin):
         index=True,
         nullable=True,
     )
+    stream_session_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("stream_sessions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
     environment: Mapped[str] = mapped_column(
         String(32),
         default="all",
@@ -47,10 +53,18 @@ class FeatureFlag(Base, TimestampMixin):
     )
 
     creator = relationship("Creator")
+    stream_session = relationship("StreamSession")
 
     __table_args__ = (
-        Index("uq_feature_flags_key_creator_env", "key", "creator_id", "environment", unique=True),
+        Index(
+            "uq_feature_flags_key_creator_stream_env",
+            "key",
+            "creator_id",
+            "stream_session_id",
+            "environment",
+            unique=True,
+        ),
     )
 
     def __repr__(self) -> str:
-        return f"<FeatureFlag(key='{self.key}', enabled={self.enabled}, creator_id='{self.creator_id}', env='{self.environment}')>"
+        return f"<FeatureFlag(key='{self.key}', enabled={self.enabled}, creator_id='{self.creator_id}', stream='{self.stream_session_id}', env='{self.environment}')>"

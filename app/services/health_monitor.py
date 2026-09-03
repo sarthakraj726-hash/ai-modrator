@@ -313,20 +313,49 @@ class HealthMonitorService:
         websub_health = await self.check_websub()
         process_metrics = self.get_process_metrics()
 
-        # Overall status calculation
-        critical_candidates = [
-            db_health.get("status"),
-            redis_health.get("status"),
-            yt_health.get("status"),
-            worker_health.get("status"),
-            economy_health.get("status"),
+        all_subsystems = {
+            "database": db_health,
+            "redis": redis_health,
+            "youtube": yt_health,
+            "workers": worker_health,
+            "openrouter": ai_health,
+            "discord": discord_health,
+            "eventbus": eventbus_health,
+            "economy": economy_health,
+            "moderation": moderation_health,
+            "websub": websub_health,
+        }
+
+        service_mode = self.settings.APP_SERVICE_MODE.lower()
+
+        # Define which subsystems are strictly critical vs peripheral for the current mode
+        if service_mode == "api":
+            critical_subsystems = ["database", "eventbus"]
+            optional_or_bypassed = ["workers", "youtube"]
+        elif service_mode == "worker":
+            critical_subsystems = ["database", "workers", "youtube", "economy"]
+            optional_or_bypassed = []
+        else:  # unified
+            critical_subsystems = ["database", "workers", "youtube", "economy", "redis"]
+            optional_or_bypassed = []
+
+        # Determine overall status with explicit severity semantics
+        critical_statuses = [
+            all_subsystems[s].get("status") for s in critical_subsystems if s in all_subsystems
         ]
-        if SubsystemStatus.CRITICAL in critical_candidates:
+        all_statuses = [
+            info.get("status")
+            for name, info in all_subsystems.items()
+            if name not in optional_or_bypassed
+        ]
+
+        if SubsystemStatus.CRITICAL in critical_statuses:
             overall_status = SubsystemStatus.CRITICAL
-        elif (
-            SubsystemStatus.UNHEALTHY in critical_candidates
-            or SubsystemStatus.DEGRADED in critical_candidates
-        ):
+        elif SubsystemStatus.UNHEALTHY in critical_statuses:
+            overall_status = SubsystemStatus.UNHEALTHY
+        elif SubsystemStatus.CRITICAL in all_statuses or SubsystemStatus.UNHEALTHY in all_statuses:
+            overall_status = SubsystemStatus.DEGRADED
+        elif SubsystemStatus.DEGRADED in all_statuses:
             overall_status = SubsystemStatus.DEGRADED
         else:
             overall_status = SubsystemStatus.HEALTHY

@@ -33,7 +33,20 @@ class DistributedLock:
 
     async def acquire(self) -> bool:
         """Attempt to acquire the lock before timeout."""
+        from app.core.config import get_settings
+
+        settings = get_settings()
         redis = await get_redis_client()
+        is_fallback = getattr(redis, "_is_fallback", False)
+
+        # In decoupled/distributed mode, fail closed if Redis is unavailable to prevent duplicate workers
+        if not settings.is_unified_service and is_fallback:
+            logger.error(
+                f"DistributedLock '{self.lock_name}' rejected: "
+                "Redis transport unavailable in DECOUPLED mode. Failing closed to prevent split-brain."
+            )
+            return False
+
         deadline = asyncio.get_event_loop().time() + self.acquire_timeout
 
         while asyncio.get_event_loop().time() < deadline:
