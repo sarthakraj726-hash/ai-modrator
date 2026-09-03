@@ -28,9 +28,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run Ruff Lint
+      - name: Run Ruff Lint & Format Check
         run: |
           ruff check .
+          ruff format --check .
+
+      - name: Security & Secret Scan Verification
+        run: |
+          python -c "
+          import os, re, sys
+          pats = [re.compile(r'AIza[0-9A-Za-z-_]{35}'), re.compile(r'sk-or-v1-[0-9a-f]{64}')]
+          leaks = []
+          for r, d, files in os.walk('.'):
+              if any(p in r for p in ['.git', '.venv', '__pycache__', 'tests']):
+                  continue
+              for f in files:
+                  if f.endswith(('.py', '.json', '.yaml', '.yml', '.env', '.toml')):
+                      path = os.path.join(r, f)
+                      with open(path, 'r', encoding='utf-8', errors='ignore') as h:
+                          for idx, l in enumerate(h, 1):
+                              for p in pats:
+                                  if p.search(l) and 'REDACTED' not in l and 'your_' not in l:
+                                      leaks.append(f'{path}:{idx}')
+          if leaks:
+              print('Detected possible unredacted secrets:', leaks)
+              sys.exit(1)
+          print('Secret scan clean.')
+          "
 
       - name: Run Pytest Suite with Coverage
         run: |

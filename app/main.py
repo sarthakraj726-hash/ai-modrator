@@ -9,6 +9,7 @@ from app.api.routes import (
     ai_router,
     commands_router,
     creators_router,
+    dashboard_router,
     health_router,
     moderation_router,
     streams_router,
@@ -88,6 +89,7 @@ def create_application() -> FastAPI:
     app.include_router(ai_router)
     app.include_router(moderation_router)
     app.include_router(commands_router)
+    app.include_router(dashboard_router, prefix="/api/v1")
 
     return app
 

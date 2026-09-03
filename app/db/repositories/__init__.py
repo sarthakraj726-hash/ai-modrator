@@ -6,11 +6,13 @@ from app.db.repositories.checkpoint_repo import CheckpointRepository
 from app.db.repositories.command_repo import CommandRepository
 from app.db.repositories.creator_ai_repo import CreatorAISettingsRepository
 from app.db.repositories.creator_repo import CreatorRepository
+from app.db.repositories.discord_config_repo import DiscordConfigRepository
 from app.db.repositories.discovery_repo import DiscoveryRepository
 from app.db.repositories.economy_repo import EconomyRepository
 from app.db.repositories.engagement_repo import EngagementRepository
 from app.db.repositories.feedback_repo import ModerationFeedbackRepository
 from app.db.repositories.game_repo import GameRepository
+from app.db.repositories.incident_repo import IncidentRepository
 from app.db.repositories.review_repo import ReviewRepository
 from app.db.repositories.store_repo import StoreRepository
 from app.db.repositories.stream_repo import StreamRepository
@@ -36,4 +38,6 @@ __all__ = [
     "EconomyRepository",
     "StoreRepository",
     "GameRepository",
+    "IncidentRepository",
+    "DiscordConfigRepository",
 ]

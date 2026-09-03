@@ -59,3 +59,9 @@ coverage.xml
 # Logs
 *.log
 logs/
+
+# Node / Next.js Dashboard
+node_modules/
+.next/
+dashboard/.next/
+dashboard/node_modules/

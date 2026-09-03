@@ -1,8 +1,8 @@
-"""Health check API routes."""
+from typing import Any
 
 from fastapi import APIRouter, Response, status
 
-from app.api.dependencies import HealthServiceDep
+from app.api.dependencies import DBSessionDep, HealthServiceDep
 from app.api.schemas.health import (
     LivenessResponse,
     ReadinessResponse,
@@ -44,3 +44,15 @@ async def get_ready(service: HealthServiceDep, response: Response) -> ReadinessR
 async def get_system_health(service: HealthServiceDep) -> SystemHealthResponse:
     health_data = await service.get_system_health()
     return SystemHealthResponse(**health_data)
+
+
+@router.get(
+    "/detailed",
+    summary="Detailed Subsystem Health & Diagnostics",
+    description="Returns continuous monitoring telemetry across all subsystems without exposing secrets.",
+)
+async def get_detailed_health(db: DBSessionDep) -> dict[str, Any]:
+    from app.services.health_monitor import HealthMonitorService
+
+    monitor = HealthMonitorService(session=db)
+    return await monitor.get_detailed_snapshot()

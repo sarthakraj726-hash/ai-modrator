@@ -6,8 +6,12 @@ from app.db.models.chat_checkpoint import YouTubeChatCheckpoint
 from app.db.models.creator import Creator
 from app.db.models.creator_ai_settings import CreatorAISettings
 from app.db.models.custom_command import CommandAlias, CustomCommand
+from app.db.models.discord_config import CreatorDiscordConfig
 from app.db.models.discovery_event import YouTubeDiscoveryEvent
 from app.db.models.economy import EconomyAccount, EconomyLedgerEntry, EconomyTransaction
+from app.db.models.feature_flag import FeatureFlag
+from app.db.models.incident import Incident
+from app.db.models.metric_snapshot import SystemMetricSnapshot
 from app.db.models.mini_game import MiniGameSession
 from app.db.models.moderation_feedback import ModerationFeedback
 from app.db.models.moderation_review import ModerationReview
@@ -43,4 +47,8 @@ __all__ = [
     "StoreItem",
     "ViewerInventory",
     "MiniGameSession",
+    "Incident",
+    "CreatorDiscordConfig",
+    "FeatureFlag",
+    "SystemMetricSnapshot",
 ]
