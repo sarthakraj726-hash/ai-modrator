@@ -140,3 +140,105 @@ async def unsubscribe_creator_websub(
         "creator_id": creator.id,
         "channel_id": creator.youtube_channel_id,
     }
+
+
+@router.get(
+    "/{creator_id}/persona",
+    summary="Get creator persona settings",
+)
+async def get_creator_persona(
+    creator_id: str,
+    service: CreatorServiceDep,
+) -> dict:
+    from app.db.repositories.creator_ai_repo import CreatorAISettingsRepository
+
+    repo = CreatorAISettingsRepository(service.session)
+    settings = await repo.get_or_create(creator_id)
+    return {
+        "creator_id": creator_id,
+        "persona_type": settings.persona_type,
+        "persona_sliders": settings.persona_sliders,
+        "custom_persona_prompt": settings.custom_persona_prompt,
+        "ai_enabled": settings.ai_enabled,
+        "ai_reply_enabled": settings.ai_reply_enabled,
+    }
+
+
+@router.put(
+    "/{creator_id}/persona",
+    summary="Update creator persona settings",
+)
+async def update_creator_persona(
+    creator_id: str,
+    payload: dict,
+    service: CreatorServiceDep,
+    admin: AdminUserDep,
+) -> dict:
+    from app.db.repositories.creator_ai_repo import CreatorAISettingsRepository
+
+    repo = CreatorAISettingsRepository(service.session)
+    settings = await repo.update_settings(
+        creator_id=creator_id,
+        persona_type=payload.get("persona_type"),
+        persona_sliders=payload.get("persona_sliders"),
+        custom_persona_prompt=payload.get("custom_persona_prompt"),
+    )
+    return {
+        "creator_id": creator_id,
+        "persona_type": settings.persona_type,
+        "persona_sliders": settings.persona_sliders,
+        "custom_persona_prompt": settings.custom_persona_prompt,
+    }
+
+
+@router.get(
+    "/{creator_id}/moderation-policy",
+    summary="Get creator moderation policy settings",
+)
+async def get_creator_moderation_policy(
+    creator_id: str,
+    service: CreatorServiceDep,
+) -> dict:
+    from app.db.repositories.creator_ai_repo import CreatorAISettingsRepository
+
+    repo = CreatorAISettingsRepository(service.session)
+    settings = await repo.get_or_create(creator_id)
+    return {
+        "creator_id": creator_id,
+        "moderation_strictness": settings.moderation_strictness,
+        "moderation_mode": settings.moderation_mode,
+        "auto_moderation_enabled": settings.auto_moderation_enabled,
+        "hitl_enabled": settings.hitl_enabled,
+        "custom_rules": settings.custom_rules,
+    }
+
+
+@router.put(
+    "/{creator_id}/moderation-policy",
+    summary="Update creator moderation policy settings",
+)
+async def update_creator_moderation_policy(
+    creator_id: str,
+    payload: dict,
+    service: CreatorServiceDep,
+    admin: AdminUserDep,
+) -> dict:
+    from app.db.repositories.creator_ai_repo import CreatorAISettingsRepository
+
+    repo = CreatorAISettingsRepository(service.session)
+    settings = await repo.update_settings(
+        creator_id=creator_id,
+        moderation_strictness=payload.get("moderation_strictness"),
+        moderation_mode=payload.get("moderation_mode"),
+        auto_moderation_enabled=payload.get("auto_moderation_enabled"),
+        hitl_enabled=payload.get("hitl_enabled"),
+        custom_rules=payload.get("custom_rules"),
+    )
+    return {
+        "creator_id": creator_id,
+        "moderation_strictness": settings.moderation_strictness,
+        "moderation_mode": settings.moderation_mode,
+        "auto_moderation_enabled": settings.auto_moderation_enabled,
+        "hitl_enabled": settings.hitl_enabled,
+        "custom_rules": settings.custom_rules,
+    }

@@ -53,10 +53,24 @@ class Settings(BaseSettings):
         description="Hard daily cap for YouTube Data API units",
     )
 
-    # OpenRouter LLM Gateway (Future AI Provider)
+    # OpenRouter LLM Gateway & Model Routing
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_DEFAULT_MODEL: str = "anthropic/claude-3.5-sonnet"
+    OPENROUTER_MODEL_PRIMARY: str = "anthropic/claude-3.5-sonnet"
+    OPENROUTER_MODEL_FAST: str = "meta-llama/llama-3.3-70b-instruct"
+    OPENROUTER_MODEL_FALLBACK: str = "mistralai/mistral-large-2411"
+    OPENROUTER_MODEL_REASONING: str = "deepseek/deepseek-r1"
+
+    # AI Budget & Rate Limiting Controls
+    AI_DAILY_REQUEST_LIMIT: int = Field(default=2000, ge=1)
+    AI_PER_STREAM_REQUEST_LIMIT: int = Field(default=500, ge=1)
+    AI_PER_USER_REQUEST_LIMIT: int = Field(default=20, ge=1)
+    AI_MONTHLY_TOKEN_BUDGET: int = Field(default=1000000, ge=1)
+    AI_MAX_REPLY_TOKENS: int = Field(default=100, ge=1)
+    HONNEY_MAX_REPLY_CHARS: int = Field(default=200, ge=1)
+    HONNEY_MAX_REPLY_TOKENS: int = Field(default=100, ge=1)
+    HITL_REVIEW_TTL_SECONDS: int = Field(default=60, ge=10, le=600)
 
     # Discord Bot & Logging Integration (Future Observability)
     DISCORD_BOT_TOKEN: str = ""

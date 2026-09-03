@@ -6,8 +6,10 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes import (
     admin_router,
+    ai_router,
     creators_router,
     health_router,
+    moderation_router,
     streams_router,
     webhooks_router,
     youtube_router,
@@ -82,6 +84,8 @@ def create_application() -> FastAPI:
     app.include_router(admin_router)
     app.include_router(webhooks_router)
     app.include_router(youtube_router)
+    app.include_router(ai_router)
+    app.include_router(moderation_router)
 
     return app
 

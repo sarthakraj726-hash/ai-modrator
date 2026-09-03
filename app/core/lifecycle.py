@@ -46,6 +46,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     worker_manager = get_worker_manager()
     logger.info("Stream worker manager initialized")
 
+    # 4. Initialize Stream Intelligence Coordinator
+    from app.workers.intelligence import get_intelligence_coordinator
+
+    coordinator = get_intelligence_coordinator()
+    await coordinator.start()
+    logger.info("Stream intelligence coordinator initialized")
+
     yield
 
     # Shutdown Phase
@@ -64,6 +71,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Redis connections closed")
     except Exception as e:
         logger.error(f"Error closing Redis client: {e}")
+
+    # Close AI Provider client
+    try:
+        from app.ai.openrouter import get_ai_provider
+
+        provider = get_ai_provider()
+        if hasattr(provider, "close"):
+            await provider.close()
+    except Exception as e:
+        logger.error(f"Error closing AI provider client: {e}")
 
     # Close Database Engine
     try:

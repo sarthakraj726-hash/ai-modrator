@@ -11,6 +11,8 @@ from app.core.logging import get_logger
 
 logger = get_logger("app.cache.redis")
 
+RedisClient = Any
+
 
 class InMemoryRedisFallback:
     """In-memory Redis replacement for testing and local fallback."""
@@ -36,6 +38,7 @@ class InMemoryRedisFallback:
         key: str,
         value: str,
         ex: int | None = None,
+        ttl: int | None = None,
         nx: bool = False,
     ) -> bool:
         async with self._lock:
@@ -43,8 +46,9 @@ class InMemoryRedisFallback:
             if nx and key in self._store:
                 return False
             self._store[key] = str(value)
-            if ex:
-                self._expirations[key] = time.time() + ex
+            expiry = ex if ex is not None else ttl
+            if expiry:
+                self._expirations[key] = time.time() + expiry
             else:
                 self._expirations.pop(key, None)
             return True
@@ -56,6 +60,12 @@ class InMemoryRedisFallback:
             new_val = current + amount
             self._store[key] = str(new_val)
             return new_val
+
+    async def incr(self, key: str) -> int:
+        return await self.incrby(key, 1)
+
+    async def decr(self, key: str) -> int:
+        return await self.decrby(key, 1)
 
     async def decrby(self, key: str, amount: int = 1) -> int:
         return await self.incrby(key, -amount)
@@ -103,6 +113,14 @@ async def get_redis_client() -> Any:
     global _redis_instance
     if _redis_instance is None:
         await init_redis()
+    return _redis_instance
+
+
+def get_redis_sync() -> Any:
+    """Synchronous accessor for Redis client or InMemoryFallback."""
+    global _redis_instance
+    if _redis_instance is None:
+        _redis_instance = InMemoryRedisFallback()
     return _redis_instance
 
 

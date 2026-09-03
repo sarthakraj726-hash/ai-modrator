@@ -1,0 +1,122 @@
+[
+  {
+    "id": "tc-001",
+    "text": "bhai ye banda pagal hai 😂",
+    "language": "hinglish",
+    "expected_action": "ALLOW",
+    "expected_intent": "playful",
+    "description": "Friendly playful banter with laughing emoji"
+  },
+  {
+    "id": "tc-002",
+    "text": "tu noob hai lol",
+    "language": "hinglish",
+    "expected_action": "ALLOW",
+    "expected_intent": "playful",
+    "description": "Casual gaming banter"
+  },
+  {
+    "id": "tc-003",
+    "text": "bhai clutch kar diya mast scene hai 🔥",
+    "language": "hinglish",
+    "expected_action": "ALLOW",
+    "expected_intent": "hype",
+    "description": "Hype and celebration in Hinglish"
+  },
+  {
+    "id": "tc-004",
+    "text": "OP gameplay bhai maja aa gaya",
+    "language": "hinglish",
+    "expected_action": "ALLOW",
+    "expected_intent": "hype",
+    "description": "Praise and positive feedback"
+  },
+  {
+    "id": "tc-005",
+    "text": "kya haal hai stream pe sab mast?",
+    "language": "hinglish",
+    "expected_action": "ALLOW",
+    "expected_intent": "friendly",
+    "description": "Casual viewer greeting"
+  },
+  {
+    "id": "tc-006",
+    "text": "chup kar sale gandu",
+    "language": "hinglish",
+    "expected_action": "TIMEOUT",
+    "expected_intent": "hostile",
+    "description": "Hostile slur targeting someone"
+  },
+  {
+    "id": "tc-007",
+    "text": "teri ma ki chut madarchod",
+    "language": "hinglish",
+    "expected_action": "TIMEOUT",
+    "expected_intent": "hostile",
+    "description": "Severe profanity and abuse"
+  },
+  {
+    "id": "tc-008",
+    "text": "i will kill you mar dalunga doxx you",
+    "language": "mixed",
+    "expected_action": "BAN",
+    "expected_intent": "hostile",
+    "description": "Extreme violent threat and dox solicitation"
+  },
+  {
+    "id": "tc-009",
+    "text": "FREE CRYPTO AND NITRO JOIN t.me/free_crypto_fast",
+    "language": "en",
+    "expected_action": "DELETE",
+    "expected_intent": "scam",
+    "description": "Scam phishing link and external invite"
+  },
+  {
+    "id": "tc-010",
+    "text": "WA.ME/919999999999 JOIN FOR LEAKS",
+    "language": "en",
+    "expected_action": "DELETE",
+    "expected_intent": "scam",
+    "description": "WhatsApp invite link"
+  },
+  {
+    "id": "tc-011",
+    "text": "PLEASE PLAY MINECRAFT PLEASE PLEASE PLEASE PLEASE PLEASE",
+    "language": "en",
+    "expected_action": "WARN",
+    "expected_intent": "spam",
+    "description": "Excessive caps spam"
+  },
+  {
+    "id": "tc-012",
+    "text": "😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂😂",
+    "language": "en",
+    "expected_action": "WARN",
+    "expected_intent": "spam",
+    "description": "Emoji flood spam"
+  },
+  {
+    "id": "tc-013",
+    "text": "bhai ye stream bohot bekar lag rahi hai mujhe",
+    "language": "hinglish",
+    "expected_action": "FLAG_FOR_REVIEW",
+    "expected_intent": "provocative",
+    "description": "Borderline negative criticism (ambiguous)"
+  },
+  {
+    "id": "tc-014",
+    "text": "abe nalla streamer koi kaam kar le",
+    "language": "hinglish",
+    "expected_action": "FLAG_FOR_REVIEW",
+    "expected_intent": "provocative",
+    "description": "Mildly hostile remark needing contextual review"
+  },
+  {
+    "id": "tc-015",
+    "text": "GG WP great match everyone!",
+    "language": "en",
+    "expected_action": "ALLOW",
+    "expected_intent": "friendly",
+    "description": "Standard English gaming chat"
+  }
+]

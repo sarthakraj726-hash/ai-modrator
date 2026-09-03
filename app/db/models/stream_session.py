@@ -10,9 +10,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin, generate_uuid
 
 if TYPE_CHECKING:
+    from app.db.models.ai_usage import AIUsageRecord
     from app.db.models.audit_event import AuditEvent
     from app.db.models.chat_checkpoint import YouTubeChatCheckpoint
     from app.db.models.creator import Creator
+    from app.db.models.moderation_review import ModerationReview
 
 
 class StreamStatus(str, Enum):
@@ -87,6 +89,16 @@ class StreamSession(Base, TimestampMixin):
         back_populates="stream_session",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    moderation_reviews: Mapped[list["ModerationReview"]] = relationship(
+        "ModerationReview",
+        back_populates="stream_session",
+        cascade="all, delete-orphan",
+    )
+    ai_usage_records: Mapped[list["AIUsageRecord"]] = relationship(
+        "AIUsageRecord",
+        back_populates="stream_session",
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (
