@@ -38,7 +38,7 @@ for root, dirs, files in os.walk("."):
             # Skip test files and examples
             if "test" in path.lower() or "example" in path.lower():
                 continue
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(path, encoding="utf-8", errors="ignore") as f:
                 for idx, line in enumerate(f, 1):
                     for pat in secret_patterns:
                         if pat.search(line):
