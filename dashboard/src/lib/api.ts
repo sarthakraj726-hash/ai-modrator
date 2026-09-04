@@ -139,9 +139,10 @@ async function safeFetchJson<T>(url: string, signal?: AbortSignal): Promise<{ da
       try {
         const errJson = await res.json();
         if (errJson?.message) errMsg = errJson.message;
-        else if (errJson?.detail) errMsg = errJson.detail;
+        else if (errJson?.detail && errJson.detail !== "Not Found") errMsg = errJson.detail;
+        else if (res.status === 404) errMsg = `Endpoint not found (HTTP 404) on backend API`;
       } catch {
-        // Fall back to HTTP status text
+        if (res.status === 404) errMsg = `Endpoint not found (HTTP 404) on backend API`;
       }
       return {
         data: null,

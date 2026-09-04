@@ -190,8 +190,15 @@ async def list_streams(db: DBSessionDep, admin: AdminUserDep) -> list[dict[str, 
 
         duration_minutes = 0.0
         if session.started_at:
+            start_t = (
+                session.started_at
+                if session.started_at.tzinfo
+                else session.started_at.replace(tzinfo=UTC)
+            )
             end_t = session.ended_at or datetime.now(UTC)
-            duration_minutes = round((end_t - session.started_at).total_seconds() / 60.0, 1)
+            if end_t.tzinfo is None:
+                end_t = end_t.replace(tzinfo=UTC)
+            duration_minutes = round((end_t - start_t).total_seconds() / 60.0, 1)
 
         duration_seconds = int(duration_minutes * 60)
         results.append(
@@ -924,3 +931,25 @@ async def stream_dashboard_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# --- 12. Direct /api/v1 Aliases (without /dashboard prefix) ---
+alias_router = APIRouter(tags=["Developer Control Center Aliases"])
+
+alias_router.add_api_route(
+    "/overview", get_dashboard_overview, methods=["GET"], summary="Control Center Overview Alias"
+)
+alias_router.add_api_route("/streams", list_streams, methods=["GET"], summary="List Streams Alias")
+alias_router.add_api_route(
+    "/quota", get_quota_telemetry, methods=["GET"], summary="Quota Status Alias"
+)
+alias_router.add_api_route(
+    "/youtube-keys", get_key_pool_status, methods=["GET"], summary="YouTube Keys Alias"
+)
+alias_router.add_api_route(
+    "/moderation", get_moderation_queue, methods=["GET"], summary="Moderation Queue Alias"
+)
+alias_router.add_api_route("/incidents", list_incidents, methods=["GET"], summary="Incidents Alias")
+alias_router.add_api_route(
+    "/events/stream", stream_dashboard_events, methods=["GET"], summary="SSE Stream Alias"
+)

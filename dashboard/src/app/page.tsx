@@ -114,6 +114,7 @@ export default function DashboardPage() {
 
   // Health / Error overview badges
   const hasAuthError = Object.values(diagnostics).some((d) => d.state === "unauthorized");
+  const has404Error = Object.values(diagnostics).some((d) => d.httpStatus === 404);
   const hasConnectionError = Object.values(diagnostics).some((d) => d.state === "error");
 
   return (
@@ -132,7 +133,17 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {hasConnectionError && !hasAuthError && (
+        {has404Error && !hasAuthError && (
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs font-mono text-amber-300">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span>API Endpoint Notice: Backend returned HTTP 404. Ensure BACKEND_API_URL points to the base service URL.</span>
+            </div>
+            <span className="text-[11px] text-amber-400/80">Check BACKEND_API_URL</span>
+          </div>
+        )}
+
+        {hasConnectionError && !hasAuthError && !has404Error && (
           <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs font-mono text-amber-300">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-400" />

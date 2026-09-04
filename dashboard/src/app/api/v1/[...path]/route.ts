@@ -12,19 +12,25 @@ export const dynamic = "force-dynamic";
  */
 
 function getBackendBaseUrl(): string {
-  // 1. Explicit backend API URL (standard project configuration)
-  if (process.env.BACKEND_API_URL && process.env.BACKEND_API_URL.trim()) {
-    return process.env.BACKEND_API_URL.trim().replace(/\/+$/, "");
+  let url = (
+    process.env.BACKEND_API_URL ||
+    process.env.INTERNAL_BACKEND_URL ||
+    process.env.RAILWAY_BACKEND_URL ||
+    "http://127.0.0.1:8000"
+  ).trim();
+
+  // Strip trailing slashes
+  url = url.replace(/\/+$/, "");
+
+  // Ensure valid HTTP/HTTPS protocol
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = `https://${url}`;
   }
-  // 2. Railway private network domain / reference variable
-  if (process.env.INTERNAL_BACKEND_URL && process.env.INTERNAL_BACKEND_URL.trim()) {
-    return process.env.INTERNAL_BACKEND_URL.trim().replace(/\/+$/, "");
-  }
-  if (process.env.RAILWAY_BACKEND_URL && process.env.RAILWAY_BACKEND_URL.trim()) {
-    return process.env.RAILWAY_BACKEND_URL.trim().replace(/\/+$/, "");
-  }
-  // 3. Local development fallback
-  return "http://127.0.0.1:8000";
+
+  // Strip trailing /api/v1 so subpath concatenation never doubles it
+  url = url.replace(/\/api\/v1\/?$/, "");
+
+  return url;
 }
 
 function getAdminSecret(): string {
@@ -40,7 +46,10 @@ function getAdminSecret(): string {
 async function proxyRequest(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const start = Date.now();
   const { path } = await context.params;
-  const subpath = Array.isArray(path) ? path.join("/") : (path || "");
+  let subpath = Array.isArray(path) ? path.join("/") : (path || "");
+  // Clean leading slashes and prevent duplicate api/v1 prefix
+  subpath = subpath.replace(/^\/+/, "").replace(/^api\/v1\/?/, "");
+
   const backendBase = getBackendBaseUrl();
   const targetUrl = `${backendBase}/api/v1/${subpath}${request.nextUrl.search}`;
   const adminSecret = getAdminSecret();
@@ -83,7 +92,11 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
     const duration = Date.now() - start;
 
     // Diagnostic logging without leaking secrets or tokens
-    console.log(`[API Proxy] ${request.method} /api/v1/${subpath} -> ${backendRes.status} (${duration}ms)`);
+    if (backendRes.status === 404) {
+      console.warn(`[API Proxy 404 Not Found] Upstream target URL was: ${targetUrl}`);
+    } else {
+      console.log(`[API Proxy] ${request.method} /api/v1/${subpath} -> ${backendRes.status} (${duration}ms)`);
+    }
 
     const resHeaders = new Headers();
     backendRes.headers.forEach((val, key) => {

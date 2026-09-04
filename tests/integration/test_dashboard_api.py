@@ -64,3 +64,29 @@ async def test_dashboard_full_flow(api_client: AsyncClient, db_session: AsyncSes
     res = await api_client.get("/health/detailed")
     assert res.status_code == 200
     assert res.json()["service"] == "goddess-ai-modrator"
+
+    # 7. Root Web Endpoint (Browser HTML)
+    res = await api_client.get("/", headers={"Accept": "text/html"})
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+    assert "GODDESS AI" in res.text
+
+    # 8. Root API Descriptor (JSON)
+    res = await api_client.get("/", headers={"Accept": "application/json"})
+    assert res.status_code == 200
+    assert res.json()["service"] == "Goddess AI / AI-Modrator"
+
+    # 9. Dashboard Web View Alias
+    res = await api_client.get("/dashboard")
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+
+    # 10. Direct /api/v1/overview Alias
+    res = await api_client.get("/api/v1/overview", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["total_creators"] >= 1
+
+    # 11. Direct /api/v1/streams Alias
+    res = await api_client.get("/api/v1/streams", headers=headers)
+    assert res.status_code == 200
+    assert isinstance(res.json(), list)

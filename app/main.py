@@ -9,10 +9,12 @@ from app.api.routes import (
     ai_router,
     commands_router,
     creators_router,
+    dashboard_alias_router,
     dashboard_router,
     health_router,
     moderation_router,
     streams_router,
+    web_router,
     webhooks_router,
     youtube_router,
 )
@@ -80,6 +82,7 @@ def create_application() -> FastAPI:
         )
 
     # 3. Include Routers
+    app.include_router(web_router)
     app.include_router(health_router)
     app.include_router(creators_router)
     app.include_router(streams_router)
@@ -90,6 +93,7 @@ def create_application() -> FastAPI:
     app.include_router(moderation_router)
     app.include_router(commands_router)
     app.include_router(dashboard_router, prefix="/api/v1")
+    app.include_router(dashboard_alias_router, prefix="/api/v1")
 
     return app
 
