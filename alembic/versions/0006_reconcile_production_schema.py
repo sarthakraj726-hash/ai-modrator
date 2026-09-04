@@ -43,7 +43,7 @@ def upgrade() -> None:
     if "creators" in existing_tables:
         safe_add_col("creators", sa.Column("youtube_channel_id", sa.String(64), nullable=True))
         safe_add_col("creators", sa.Column("channel_name", sa.String(255), nullable=True))
-        safe_add_col("creators", sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("1")))
+        safe_add_col("creators", sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")))
 
     # -------------------------------------------------------------------------
     # 2. moderation_reviews (ensure table & creator_id exist)
@@ -191,7 +191,7 @@ def upgrade() -> None:
             sa.Column("log_channel_id", sa.String(length=64), nullable=True),
             sa.Column("alert_channel_id", sa.String(length=64), nullable=True),
             sa.Column("summary_channel_id", sa.String(length=64), nullable=True),
-            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
@@ -207,7 +207,7 @@ def upgrade() -> None:
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("key", sa.String(length=64), nullable=False),
             sa.Column("description", sa.String(length=255), nullable=False),
-            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("creator_id", sa.String(length=36), nullable=True),
             sa.Column("environment", sa.String(length=32), nullable=False, server_default="all"),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
