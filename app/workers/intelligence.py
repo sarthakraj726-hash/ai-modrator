@@ -127,6 +127,17 @@ class StreamIntelligenceCoordinator:
         author_id = event.author_channel_id
         author_name = event.author_display_name
 
+        # Bot self-trigger loop prevention: never process bot's own messages
+        is_bot = (
+            getattr(event, "is_bot", False)
+            or author_id in ("HONNEY_BOT", "AI_MODERATOR_BOT", "GODDESS_AI")
+            or (
+                bool(author_name) and author_name.strip().lower() in ResponseTriggerEngine.BOT_NAMES
+            )
+        )
+        if is_bot:
+            return
+
         # Update sliding chat context
         history = self._recent_chat_history.setdefault(session_id, [])
         history.append(f"{author_name}: {text}")
@@ -234,6 +245,8 @@ class StreamIntelligenceCoordinator:
             text=text,
             stream_session_id=session_id,
             context_engine=self.context_engine,
+            author_name=author_name,
+            is_bot=is_bot,
         )
 
         if trigger_type == TriggerType.NONE:

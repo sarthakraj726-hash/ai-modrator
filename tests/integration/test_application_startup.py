@@ -84,6 +84,7 @@ def test_production_postgresql_startup_smoke_test(monkeypatch):
     3. StreamIntelligenceCoordinator initializes without unawaited coroutine or psycopg2 error
     """
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ADMIN_SECRET", "prod-secure-token-1234567890")
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql://railway_user:fake_password@containers-us-west-1.railway.app:5432/railway",

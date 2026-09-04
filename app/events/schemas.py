@@ -95,6 +95,7 @@ class ChatMessageReceivedEvent(BaseEvent):
     is_channel_owner: bool = False
     is_member: bool = False
     is_verified: bool = False
+    is_bot: bool = False
 
 
 class YouTubeKeyCooldownEvent(BaseEvent):

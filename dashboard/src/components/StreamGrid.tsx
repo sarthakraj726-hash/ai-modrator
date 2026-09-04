@@ -62,7 +62,7 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
         <Tv className="w-10 h-10 mx-auto mb-3 text-slate-600" />
         <p className="text-slate-400 text-sm font-medium">No live streams active.</p>
         <p className="text-xs text-slate-500 mt-1">
-          Click "+ CONNECT STREAM" in the top header to attach a YouTube Live broadcast.
+          Click &ldquo;+ CONNECT STREAM&rdquo; in the top header to attach a YouTube Live broadcast.
         </p>
       </div>
     );

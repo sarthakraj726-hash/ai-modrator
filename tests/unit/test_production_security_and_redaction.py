@@ -66,6 +66,7 @@ async def test_redis_init_logging_never_exposes_credentials(caplog, monkeypatch)
     raw_url = f"redis://default:{secret_pass}@mock-redis.internal:6379/0"
 
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ADMIN_SECRET", "prod-secure-token-1234567890")
     monkeypatch.setenv("REDIS_URL", raw_url)
     monkeypatch.setenv("DATABASE_URL", "postgresql://pguser:secret@mock-db.internal:5432/railway")
     get_settings.cache_clear()
@@ -88,6 +89,7 @@ async def test_redis_init_logging_never_exposes_credentials(caplog, monkeypatch)
 def test_app_env_production_validation(monkeypatch):
     """Verify APP_ENV=production enforces production constraints and fails on invalid configurations."""
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ADMIN_SECRET", "prod-secure-token-1234567890")
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql://pguser:pass123@containers-us-west-1.railway.app:5432/railway",
@@ -112,6 +114,7 @@ def test_railway_environment_autodetection(monkeypatch):
     """Verify that Railway environment hints auto-detect production if APP_ENV is unset."""
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setenv("ADMIN_SECRET", "prod-secure-token-1234567890")
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql://railway_user:pass@containers-us-west-1.railway.app:5432/railway",
@@ -121,5 +124,48 @@ def test_railway_environment_autodetection(monkeypatch):
     settings = Settings()
     assert settings.APP_ENV == "production"
     assert settings.is_production is True
+
+    get_settings.cache_clear()
+
+
+def test_production_fails_fast_on_insecure_default_admin_secret(monkeypatch):
+    """Verify that production startup immediately fails if default insecure admin secrets are used."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://user:pass@db.railway.internal:5432/prod",
+    )
+    # 1. Default dev secret must fail
+    monkeypatch.setenv("ADMIN_SECRET", "dev-admin-secret-replace-in-production")
+    get_settings.cache_clear()
+    with pytest.raises(ValueError) as exc:
+        Settings()
+    assert "Production security violation: ADMIN_SECRET must be set" in str(exc.value)
+
+    # 2. Generic weak password must fail
+    monkeypatch.setenv("ADMIN_SECRET", "password")
+    get_settings.cache_clear()
+    with pytest.raises(ValueError) as exc2:
+        Settings()
+    assert "Production security violation" in str(exc2.value)
+
+    get_settings.cache_clear()
+
+
+def test_production_cors_restricts_wildcard_origins(monkeypatch):
+    """Verify that in production, wildcard CORS origin ['*'] is replaced with safe origins."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ADMIN_SECRET", "prod-super-secure-token-998877")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://user:pass@db.railway.internal:5432/prod",
+    )
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    get_settings.cache_clear()
+
+    settings = Settings()
+    assert settings.is_production is True
+    assert "*" not in settings.CORS_ORIGINS
+    assert "https://railway.app" in settings.CORS_ORIGINS
 
     get_settings.cache_clear()

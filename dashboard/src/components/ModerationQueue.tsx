@@ -58,7 +58,7 @@ export const ModerationQueue: React.FC<ModerationQueueProps> = ({ reviews, onRes
               </div>
 
               <div className="p-2 rounded bg-black/40 text-slate-300 italic break-words border border-slate-900">
-                "{r.message_text}"
+                &ldquo;{r.message_text}&rdquo;
               </div>
 
               <div className="flex items-center justify-between pt-1">

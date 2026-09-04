@@ -136,10 +136,27 @@ class Settings(BaseSettings):
         return normalize_database_url(v, app_env="development")
 
     @model_validator(mode="after")
-    def validate_production_database(self) -> "Settings":
+    def validate_production_security(self) -> "Settings":
         from app.core.database_url import normalize_database_url
 
         self.DATABASE_URL = normalize_database_url(self.DATABASE_URL, app_env=self.APP_ENV)
+
+        if self.is_production:
+            insecure_secrets = {
+                "dev-admin-secret-replace-in-production",
+                "change-this-to-a-secure-random-secret-in-production",
+                "admin",
+                "secret",
+                "password",
+            }
+            if self.ADMIN_SECRET in insecure_secrets:
+                raise ValueError(
+                    "Production security violation: ADMIN_SECRET must be set to a secure secret and cannot use development placeholders."
+                )
+
+            if self.CORS_ORIGINS == ["*"]:
+                self.CORS_ORIGINS = ["https://railway.app"]
+
         return self
 
     @property

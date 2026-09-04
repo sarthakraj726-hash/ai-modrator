@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { StreamGrid } from "@/components/StreamGrid";
 import { QuotaCard } from "@/components/QuotaCard";
@@ -21,41 +21,39 @@ export default function DashboardPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Headers with admin authorization
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
+    const adminSecret =
+      process.env.NEXT_PUBLIC_ADMIN_SECRET ||
+      (typeof window !== "undefined" ? localStorage.getItem("admin_secret") : null) ||
+      "change-this-to-a-secure-random-secret-in-production";
     return {
       "Content-Type": "application/json",
-      "X-Admin-Secret": "change-this-to-a-secure-random-secret-in-production",
+      "X-Admin-Secret": adminSecret,
     };
   };
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setIsRefreshing(true);
     try {
       const headers = getAuthHeaders();
+      const signal = AbortSignal.timeout(8000);
 
-      // Fetch Overview
-      const ovRes = await fetch("/api/v1/dashboard/overview", { headers });
-      if (ovRes.ok) setOverview(await ovRes.json());
+      // Concurrent fetch across all operational endpoints with resilient partial failure tolerance
+      const [ovRes, stRes, qRes, kRes, mRes, iRes] = await Promise.allSettled([
+        fetch("/api/v1/dashboard/overview", { headers, signal }),
+        fetch("/api/v1/dashboard/streams", { headers, signal }),
+        fetch("/api/v1/dashboard/quota", { headers, signal }),
+        fetch("/api/v1/dashboard/youtube-keys", { headers, signal }),
+        fetch("/api/v1/dashboard/moderation?status_filter=PENDING", { headers, signal }),
+        fetch("/api/v1/dashboard/incidents", { headers, signal }),
+      ]);
 
-      // Fetch Streams
-      const stRes = await fetch("/api/v1/dashboard/streams", { headers });
-      if (stRes.ok) setStreams(await stRes.json());
-
-      // Fetch Quota
-      const qRes = await fetch("/api/v1/dashboard/quota", { headers });
-      if (qRes.ok) setQuota(await qRes.json());
-
-      // Fetch Keys
-      const kRes = await fetch("/api/v1/dashboard/youtube-keys", { headers });
-      if (kRes.ok) setKeys(await kRes.json());
-
-      // Fetch Moderation Queue
-      const mRes = await fetch("/api/v1/dashboard/moderation?status_filter=PENDING", { headers });
-      if (mRes.ok) setReviews(await mRes.json());
-
-      // Fetch Incidents
-      const iRes = await fetch("/api/v1/dashboard/incidents", { headers });
-      if (iRes.ok) setIncidents(await iRes.json());
+      if (ovRes.status === "fulfilled" && ovRes.value.ok) setOverview(await ovRes.value.json());
+      if (stRes.status === "fulfilled" && stRes.value.ok) setStreams(await stRes.value.json());
+      if (qRes.status === "fulfilled" && qRes.value.ok) setQuota(await qRes.value.json());
+      if (kRes.status === "fulfilled" && kRes.value.ok) setKeys(await kRes.value.json());
+      if (mRes.status === "fulfilled" && mRes.value.ok) setReviews(await mRes.value.json());
+      if (iRes.status === "fulfilled" && iRes.value.ok) setIncidents(await iRes.value.json());
 
       setLastRefreshed(new Date().toLocaleTimeString());
     } catch (e) {
@@ -63,13 +61,13 @@ export default function DashboardPage() {
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 10000); // 10s fallback poll
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchDashboardData]);
 
   // Stream Control Action
   const handleStreamControl = async (streamId: string, action: string) => {
@@ -78,6 +76,7 @@ export default function DashboardPage() {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({ action }),
+        signal: AbortSignal.timeout(8000),
       });
       if (res.ok) {
         await fetchDashboardData();
@@ -93,6 +92,7 @@ export default function DashboardPage() {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({ url_or_video_id: urlOrId }),
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
       const errData = await res.json();
@@ -103,31 +103,46 @@ export default function DashboardPage() {
 
   // Reset Key Cooldown
   const handleResetKey = async (index: number) => {
-    await fetch(`/api/v1/dashboard/youtube-keys/${index}/reset`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-    });
-    await fetchDashboardData();
+    try {
+      await fetch(`/api/v1/dashboard/youtube-keys/${index}/reset`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        signal: AbortSignal.timeout(8000),
+      });
+      await fetchDashboardData();
+    } catch (e) {
+      console.error("Reset key error:", e);
+    }
   };
 
   // Resolve Review
   const handleResolveReview = async (reviewId: string, action: string) => {
-    await fetch(`/api/v1/dashboard/moderation/reviews/${reviewId}/resolve`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ action }),
-    });
-    await fetchDashboardData();
+    try {
+      await fetch(`/api/v1/dashboard/moderation/reviews/${reviewId}/resolve`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action }),
+        signal: AbortSignal.timeout(8000),
+      });
+      await fetchDashboardData();
+    } catch (e) {
+      console.error("Resolve review error:", e);
+    }
   };
 
   // Resolve Incident
   const handleResolveIncident = async (incidentId: string) => {
-    await fetch(`/api/v1/dashboard/incidents/${incidentId}/resolve`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ status: "RESOLVED", resolution: "Resolved via Control Center" }),
-    });
-    await fetchDashboardData();
+    try {
+      await fetch(`/api/v1/dashboard/incidents/${incidentId}/resolve`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status: "RESOLVED", resolution: "Resolved via Control Center" }),
+        signal: AbortSignal.timeout(8000),
+      });
+      await fetchDashboardData();
+    } catch (e) {
+      console.error("Resolve incident error:", e);
+    }
   };
 
   return (

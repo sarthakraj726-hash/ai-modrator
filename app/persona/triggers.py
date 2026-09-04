@@ -69,17 +69,35 @@ class ResponseTriggerEngine:
         r"\b(bye|good\s*night|gn|see\s*ya|cya|alvida|tata)\b", re.IGNORECASE
     )
 
+    BOT_NAMES = {
+        "honney",
+        "goddess ai",
+        "ai moderator",
+        "ai-modrator",
+        "goddess-ai",
+        "honney co-host",
+        "system",
+        "bot",
+    }
+
     @classmethod
     def evaluate_trigger(
         cls,
         text: str,
         stream_session_id: str,
         context_engine: StreamContextEngine | None = None,
+        author_name: str = "",
+        is_bot: bool = False,
     ) -> tuple[TriggerType, str]:
         """
         Evaluate message text to decide trigger category.
         Returns (TriggerType, matched_keyword).
+        Prevents self-trigger loops if the message is from the bot itself.
         """
+        # Bot self-trigger loop prevention
+        if is_bot or (author_name and author_name.strip().lower() in cls.BOT_NAMES):
+            return TriggerType.NONE, ""
+
         cleaned = text.strip()
 
         # 1. Direct bot mention
