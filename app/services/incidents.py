@@ -25,7 +25,22 @@ LEGAL_INCIDENT_TRANSITIONS: dict[str, set[str]] = {
 }
 
 _incident_creation_locks: dict[str, asyncio.Lock] = {}
-_locks_lock = asyncio.Lock()
+_locks_lock: asyncio.Lock | None = None
+_last_loop = None
+
+
+def _get_locks_lock() -> asyncio.Lock:
+    global _locks_lock, _last_loop
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _locks_lock is None or _last_loop is not current_loop:
+        _locks_lock = asyncio.Lock()
+        _incident_creation_locks.clear()
+        _last_loop = current_loop
+    return _locks_lock
 
 
 class IncidentService:
@@ -43,7 +58,8 @@ class IncidentService:
         self.event_bus = event_bus or get_event_bus()
 
     async def _get_creation_lock(self, fingerprint: str) -> asyncio.Lock:
-        async with _locks_lock:
+        locks_lock = _get_locks_lock()
+        async with locks_lock:
             if fingerprint not in _incident_creation_locks:
                 _incident_creation_locks[fingerprint] = asyncio.Lock()
             return _incident_creation_locks[fingerprint]

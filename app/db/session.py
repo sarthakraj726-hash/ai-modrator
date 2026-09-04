@@ -65,12 +65,54 @@ def async_session_maker() -> AsyncSession:
 
 
 async def init_db_engine() -> None:
-    """Initialize database engine and create tables if in development/testing."""
+    """Initialize database engine, run schema migrations, and ensure default records."""
     engine = get_engine()
     settings = get_settings()
+
+    # 1. Run Alembic migrations automatically on startup
+    try:
+        import asyncio
+
+        from alembic.config import Config
+
+        from alembic import command
+
+        def _upgrade() -> None:
+            alembic_cfg = Config("alembic.ini", attributes={"configure_logger": False})
+            command.upgrade(alembic_cfg, "head")
+
+        await asyncio.to_thread(_upgrade)
+        logger.info("Database schema migrations verified and up-to-date (head)")
+    except Exception as mig_err:
+        logger.warning(f"Alembic auto-migration warning: {mig_err}")
+
+    # 2. Testing / SQLite fallback
     if settings.is_testing or "sqlite" in settings.DATABASE_URL:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+    # 3. Seed default creator if empty
+    try:
+        from sqlalchemy import func, select
+
+        from app.db.models.creator import Creator
+
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = select(func.count(Creator.id))
+            count_res = await session.execute(stmt)
+            if (count_res.scalar() or 0) == 0:
+                default_creator = Creator(
+                    id="default-creator",
+                    youtube_channel_id="UC_default_channel",
+                    channel_name="Goddess Primary Channel",
+                    enabled=True,
+                )
+                session.add(default_creator)
+                await session.commit()
+                logger.info("Seeded default primary creator record (default-creator)")
+    except Exception as seed_err:
+        logger.warning(f"Default creator seeding note: {seed_err}")
 
 
 async def close_db_engine() -> None:

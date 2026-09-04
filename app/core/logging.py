@@ -101,9 +101,10 @@ def setup_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level.upper())
 
-    # Clear existing handlers
+    # Clear existing handlers (preserving pytest test capture handlers if present)
     for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
+        if "LogCapture" not in handler.__class__.__name__:
+            root_logger.removeHandler(handler)
 
     stream_handler = logging.StreamHandler(sys.stdout)
     if app_env == "production":

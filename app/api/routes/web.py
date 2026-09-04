@@ -501,8 +501,14 @@ def render_control_center_html(environment: str, version: str) -> str:
           body: JSON.stringify({{ url_or_video_id: urlOrId }})
         }});
         if (!res.ok) {{
-          const err = await res.json();
-          alert("Connection failed: " + (err.detail || err.message || res.statusText));
+          let msg = "HTTP " + res.status;
+          try {{
+            const err = await res.json();
+            msg = err.detail || (err.error && (err.error.message || err.error.type)) || err.message || JSON.stringify(err);
+          }} catch (_) {{
+            msg = res.statusText || ("HTTP " + res.status);
+          }}
+          alert("Connection failed: " + msg);
         }} else {{
           closeConnectModal();
           document.getElementById("modal-stream-url").value = "";

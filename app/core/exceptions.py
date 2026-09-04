@@ -102,8 +102,20 @@ class RateLimitExceededError(AppException):
 class YouTubeAPIError(AppException):
     """Base exception for YouTube API interactions."""
 
-    def __init__(self, message: str, status_code: int = 502, details: dict[str, Any] | None = None):
-        super().__init__(message=message, status_code=status_code, details=details)
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 502,
+        reason: str | None = None,
+        details: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ):
+        merged_details = dict(details or {})
+        if reason is not None:
+            merged_details.setdefault("reason", reason)
+        merged_details.update(kwargs)
+        super().__init__(message=message, status_code=status_code, details=merged_details)
+        self.reason = reason
 
 
 class YouTubeQuotaExceededError(YouTubeAPIError):

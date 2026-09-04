@@ -65,18 +65,37 @@ def create_application() -> FastAPI:
             },
         )
 
+    _last_error_log_times: dict[str, float] = {}
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.error(
-            f"Unhandled exception on {request.method} {request.url.path}: {exc}",
-            exc_info=True,
-        )
+        import time
+
+        error_key = f"{request.method}:{request.url.path}:{type(exc).__name__}:{str(exc)[:80]}"
+        now = time.time()
+        last_logged = _last_error_log_times.get(error_key, 0.0)
+
+        # Log full traceback at most once every 10 seconds per unique endpoint+error pattern
+        if now - last_logged > 10.0:
+            _last_error_log_times[error_key] = now
+            if len(_last_error_log_times) > 200:
+                _last_error_log_times.clear()
+            logger.error(
+                f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+                exc_info=True,
+            )
+        else:
+            logger.debug(
+                f"Throttled duplicate exception on {request.method} {request.url.path}: {exc}"
+            )
+
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
                 "error": {
                     "type": "InternalServerError",
                     "message": "An unexpected server error occurred.",
+                    "detail": str(exc) if not settings.is_production else "Internal server error",
                 }
             },
         )
