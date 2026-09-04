@@ -7,6 +7,7 @@ from typing import Any
 import redis.asyncio as aioredis
 
 from app.core.config import get_settings
+from app.core.database_url import sanitize_redis_url
 from app.core.logging import get_logger
 
 logger = get_logger("app.cache.redis")
@@ -144,9 +145,13 @@ async def init_redis() -> Any:
         )
         await client.ping()
         _redis_instance = client
-        logger.info(f"Connected to Redis at {settings.REDIS_URL}")
+        safe_url = sanitize_redis_url(settings.REDIS_URL)
+        logger.info(f"Connected to Redis at {safe_url}")
     except Exception as e:
-        logger.warning(f"Could not connect to Redis ({e}). Falling back to InMemoryRedisFallback.")
+        safe_err = sanitize_redis_url(str(e))
+        logger.warning(
+            f"Could not connect to Redis ({safe_err}). Falling back to InMemoryRedisFallback."
+        )
         _redis_instance = InMemoryRedisFallback()
     return _redis_instance
 

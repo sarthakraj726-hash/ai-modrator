@@ -29,6 +29,7 @@ COPY --from=builder /root/.local /home/appuser/.local
 ENV PATH=/home/appuser/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV APP_ENV=production
 
 # Copy application source
 COPY --chown=appuser:appgroup app/ /app/app/

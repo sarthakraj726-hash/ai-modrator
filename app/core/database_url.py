@@ -7,18 +7,30 @@ from app.core.logging import get_logger
 logger = get_logger("app.core.database_url")
 
 
-def sanitize_database_url(url: str) -> str:
+def sanitize_connection_url(url: str) -> str:
     """
-    Mask passwords in database connection string for safe logging and error reporting.
-    e.g. postgresql+asyncpg://user:secret@host:5432/db -> postgresql+asyncpg://user:***@host:5432/db
+    Mask credentials in any database, Redis, or HTTP connection string.
+    Supports both user:password@host and :password@host formats.
+    e.g. redis://default:secret@host:6379/0 -> redis://default:***@host:6379/0
+    e.g. redis://:secret@host:6379/0        -> redis://:***@host:6379/0
     """
     if not url:
         return ""
     try:
-        # Regex replacement for password in URI format: scheme://user:pass@host
-        return re.sub(r"://([^:@]+):([^@]+)@", r"://\1:***@", url)
+        # Regex replacement for password in URI format: scheme://[user]:pass@host
+        return re.sub(r"://([^:@]*):([^@]+)@", r"://\1:***@", str(url))
     except Exception:
-        return "[REDACTED_DATABASE_URL]"
+        return "[REDACTED_URL]"
+
+
+def sanitize_database_url(url: str) -> str:
+    """Mask credentials in database connection string for safe logging."""
+    return sanitize_connection_url(url)
+
+
+def sanitize_redis_url(url: str) -> str:
+    """Mask credentials in Redis connection string for safe logging."""
+    return sanitize_connection_url(url)
 
 
 def normalize_database_url(url: str, app_env: str = "development") -> str:

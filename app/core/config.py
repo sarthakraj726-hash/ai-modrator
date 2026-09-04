@@ -1,7 +1,7 @@
 """Centralized application settings using Pydantic Settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -81,6 +81,43 @@ class Settings(BaseSettings):
     # Discord Bot & Logging Integration (Future Observability)
     DISCORD_BOT_TOKEN: str = ""
     DISCORD_DEV_CHANNEL_ID: str = ""
+
+    @field_validator("APP_ENV", mode="before")
+    @classmethod
+    def validate_app_env(cls, v: Any) -> str:
+        import os
+
+        env_var = os.environ.get("APP_ENV")
+        if env_var and env_var.strip():
+            clean = env_var.strip().lower()
+            if clean in ("production", "prod"):
+                return "production"
+            if clean in ("testing", "test"):
+                return "testing"
+            if clean in ("development", "dev"):
+                return "development"
+            return clean
+
+        # Auto-detect Railway production environment if APP_ENV not explicitly set
+        railway_env = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get(
+            "RAILWAY_ENVIRONMENT_NAME"
+        )
+        if railway_env and railway_env.lower() in ("production", "prod"):
+            return "production"
+        if os.environ.get("RAILWAY_PROJECT_ID") or os.environ.get("RAILWAY_SERVICE_ID"):
+            return "production"
+
+        if isinstance(v, str) and v.strip():
+            clean = v.strip().lower()
+            if clean in ("production", "prod"):
+                return "production"
+            if clean in ("testing", "test"):
+                return "testing"
+            if clean in ("development", "dev"):
+                return "development"
+            return clean
+
+        return "development"
 
     @field_validator("LOG_LEVEL")
     @classmethod
