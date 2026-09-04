@@ -148,8 +148,14 @@ class Settings(BaseSettings):
                 "admin",
                 "secret",
                 "password",
+                "12345678",
+                "administrator",
+                "root",
+                "changeme",
+                "default",
             }
-            if self.ADMIN_SECRET in insecure_secrets:
+            admin_val = (self.ADMIN_SECRET or "").strip()
+            if not admin_val or admin_val.lower() in insecure_secrets or len(admin_val) < 16:
                 raise ValueError(
                     "Production security violation: ADMIN_SECRET must be set to a secure secret and cannot use development placeholders."
                 )

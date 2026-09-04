@@ -152,6 +152,82 @@ def test_production_fails_fast_on_insecure_default_admin_secret(monkeypatch):
     get_settings.cache_clear()
 
 
+def test_admin_secret_policy_development_defaults_allowed(monkeypatch):
+    """Verify that development and testing environments allow default dev admin secret."""
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("ADMIN_SECRET", "dev-admin-secret-replace-in-production")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    get_settings.cache_clear()
+
+    settings = Settings()
+    assert settings.APP_ENV == "development"
+    assert settings.ADMIN_SECRET == "dev-admin-secret-replace-in-production"
+    get_settings.cache_clear()
+
+
+def test_admin_secret_policy_production_missing_secret_fails(monkeypatch):
+    """Verify that production startup fails if ADMIN_SECRET is missing or empty."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ADMIN_SECRET", "")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@db.railway.internal:5432/prod")
+    get_settings.cache_clear()
+
+    with pytest.raises(ValueError) as exc:
+        Settings()
+    assert "Production security violation: ADMIN_SECRET must be set" in str(exc.value)
+    get_settings.cache_clear()
+
+
+def test_admin_secret_policy_production_placeholder_fails(monkeypatch):
+    """Verify that production startup fails if ADMIN_SECRET uses known development placeholders."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@db.railway.internal:5432/prod")
+
+    placeholders = [
+        "dev-admin-secret-replace-in-production",
+        "change-this-to-a-secure-random-secret-in-production",
+        "admin",
+        "secret",
+        "password",
+        "changeme",
+        "12345678",
+    ]
+    for placeholder in placeholders:
+        monkeypatch.setenv("ADMIN_SECRET", placeholder)
+        get_settings.cache_clear()
+        with pytest.raises(ValueError) as exc:
+            Settings()
+        assert "Production security violation: ADMIN_SECRET must be set" in str(exc.value)
+
+    get_settings.cache_clear()
+
+
+def test_admin_secret_policy_production_weak_secret_fails(monkeypatch):
+    """Verify that production startup fails if ADMIN_SECRET is shorter than 16 characters."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@db.railway.internal:5432/prod")
+    monkeypatch.setenv("ADMIN_SECRET", "short_weak_123")  # 14 chars
+    get_settings.cache_clear()
+
+    with pytest.raises(ValueError) as exc:
+        Settings()
+    assert "Production security violation: ADMIN_SECRET must be set" in str(exc.value)
+    get_settings.cache_clear()
+
+
+def test_admin_secret_policy_production_strong_secret_passes(monkeypatch):
+    """Verify that production startup succeeds when configured with a strong synthetic secret."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@db.railway.internal:5432/prod")
+    monkeypatch.setenv("ADMIN_SECRET", "FakeProductionSecretOnlyForTests_123!")
+    get_settings.cache_clear()
+
+    settings = Settings()
+    assert settings.APP_ENV == "production"
+    assert settings.ADMIN_SECRET == "FakeProductionSecretOnlyForTests_123!"
+    get_settings.cache_clear()
+
+
 def test_production_cors_restricts_wildcard_origins(monkeypatch):
     """Verify that in production, wildcard CORS origin ['*'] is replaced with safe origins."""
     monkeypatch.setenv("APP_ENV", "production")

@@ -27,6 +27,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         service_name=settings.APP_NAME,
     )
     logger.info(f"Starting {settings.APP_NAME} in '{settings.APP_ENV}' environment")
+    logger.info(
+        f"Startup diagnostics: APP_ENV={settings.APP_ENV}, "
+        f"ADMIN_SECRET={'configured' if settings.ADMIN_SECRET else 'missing'}, "
+        f"DATABASE_URL={'configured' if settings.DATABASE_URL else 'missing'}, "
+        f"REDIS_URL={'configured' if settings.REDIS_URL else 'missing'}, "
+        f"YOUTUBE_KEYS={len(settings.youtube_api_keys)}, "
+        f"AI_KEYS={'configured' if settings.OPENROUTER_API_KEY else 'missing'}"
+    )
 
     # 1. Initialize Database Engine
     try:
