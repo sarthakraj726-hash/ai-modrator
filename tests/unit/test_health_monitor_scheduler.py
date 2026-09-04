@@ -50,14 +50,17 @@ async def test_health_supervisor_lifecycle_and_evaluation(db_session: AsyncSessi
 @pytest.mark.asyncio
 async def test_health_supervisor_timeout_shielding():
     """Verify health supervisor isolates exceptions and continues running."""
+    from unittest.mock import patch
+
     supervisor = HealthMonitorSupervisor(interval_seconds=0.05, timeout_seconds=0.01)
 
-    # Mock an evaluate cycle that raises an exception
-    async def failing_cycle():
-        raise RuntimeError("Simulated transient check failure")
-
-    # Manually trigger evaluate_cycle failure handling
-    snapshot = await supervisor.evaluate_cycle()
-    assert snapshot is not None
-    assert snapshot["overall_status"] == SubsystemStatus.CRITICAL
-    assert supervisor.consecutive_failures >= 1
+    # Mock an evaluate cycle that raises an exception / timeout
+    with patch(
+        "app.services.health_monitor.HealthMonitorService.get_detailed_snapshot",
+        side_effect=RuntimeError("Simulated transient check failure"),
+    ):
+        # Manually trigger evaluate_cycle failure handling
+        snapshot = await supervisor.evaluate_cycle()
+        assert snapshot is not None
+        assert snapshot["overall_status"] == SubsystemStatus.CRITICAL
+        assert supervisor.consecutive_failures >= 1
