@@ -2,30 +2,17 @@
 
 import React from "react";
 import { Key, Gauge, AlertTriangle, CheckCircle2 } from "lucide-react";
-
-interface KeyItem {
-  key_index: number;
-  masked_key: string;
-  requests_made: number;
-  quota_units: number;
-  in_cooldown: boolean;
-  cooldown_until: string | null;
-  last_used_at: string | null;
-}
+import { KeyItem, QuotaData } from "@/lib/api";
 
 interface QuotaCardProps {
-  quota: {
-    budget: number;
-    consumed: number;
-    remaining: number;
-    percent_used: number;
-    threshold_status: string;
-  };
+  quota: QuotaData | null;
   keys: KeyItem[];
   onResetKey: (index: number) => void;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
-export const QuotaCard: React.FC<QuotaCardProps> = ({ quota, keys, onResetKey }) => {
+export const QuotaCard: React.FC<QuotaCardProps> = ({ quota, keys, onResetKey, isLoading, error }) => {
   const percent = quota?.percent_used || 0;
 
   const getProgressColor = () => {
@@ -33,6 +20,16 @@ export const QuotaCard: React.FC<QuotaCardProps> = ({ quota, keys, onResetKey })
     if (percent >= 75) return "bg-amber-500";
     return "bg-gradient-to-r from-purple-500 to-cyan-400";
   };
+
+  if (error) {
+    return (
+      <div className="cyber-panel p-6 text-center border border-amber-500/40 bg-amber-500/5 space-y-2">
+        <Gauge className="w-8 h-8 mx-auto text-amber-400" />
+        <p className="text-amber-300 text-sm font-semibold">Quota Telemetry Unavailable</p>
+        <p className="text-xs text-slate-400 font-mono">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="cyber-panel p-5 space-y-5">

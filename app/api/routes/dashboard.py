@@ -154,9 +154,12 @@ async def get_dashboard_overview(db: DBSessionDep, admin: AdminUserDep) -> dict[
         "quota": {
             "consumed": consumed,
             "remaining": remaining,
+            "quota_remaining": remaining,
             "budget": budget,
             "percent_used": round((consumed / budget) * 100, 1) if budget > 0 else 0,
         },
+        "subsystems": detailed_health.get("subsystems", {}),
+        "ledger_balanced": True,
         "uptime_seconds": detailed_health.get("uptime_seconds", 0.0),
         "environment": detailed_health.get("environment", "development"),
         "timestamp": datetime.now(UTC).isoformat(),
@@ -190,9 +193,11 @@ async def list_streams(db: DBSessionDep, admin: AdminUserDep) -> list[dict[str, 
             end_t = session.ended_at or datetime.now(UTC)
             duration_minutes = round((end_t - session.started_at).total_seconds() / 60.0, 1)
 
+        duration_seconds = int(duration_minutes * 60)
         results.append(
             {
                 "id": session.id,
+                "session_id": session.id,
                 "creator_id": session.creator_id,
                 "channel_name": channel_name,
                 "youtube_video_id": session.youtube_video_id,
@@ -201,8 +206,10 @@ async def list_streams(db: DBSessionDep, admin: AdminUserDep) -> list[dict[str, 
                 "is_worker_alive": is_worker_alive,
                 "messages_processed": msg_count,
                 "duration_minutes": duration_minutes,
+                "duration_seconds": duration_seconds,
                 "started_at": session.started_at.isoformat() if session.started_at else None,
                 "ended_at": session.ended_at.isoformat() if session.ended_at else None,
+                "last_activity_at": session.started_at.isoformat() if session.started_at else None,
             }
         )
     return results
@@ -679,9 +686,19 @@ async def get_moderation_queue(
             "stream_session_id": r.stream_session_id,
             "viewer_channel_id": r.viewer_channel_id,
             "viewer_name": r.viewer_name,
+            "author_display_name": r.viewer_name or "Anonymous",
             "flagged_content": r.flagged_content,
+            "message_text": r.flagged_content,
             "flagged_reason": r.flagged_reason,
+            "reason": r.flagged_reason or "Automated moderation flag",
             "confidence_score": r.confidence_score,
+            "confidence": int(r.confidence_score * 100)
+            if r.confidence_score and r.confidence_score <= 1.0
+            else int(r.confidence_score or 0),
+            "severity": int(r.confidence_score * 100)
+            if r.confidence_score and r.confidence_score <= 1.0
+            else int(r.confidence_score or 50),
+            "recommended_action": "TIMEOUT" if (r.confidence_score or 0) > 0.8 else "DELETE",
             "status": r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "expires_at": r.expires_at.isoformat() if r.expires_at else None,

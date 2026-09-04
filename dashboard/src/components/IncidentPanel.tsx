@@ -2,24 +2,16 @@
 
 import React from "react";
 import { AlertCircle, CheckCircle, ShieldAlert } from "lucide-react";
-
-interface IncidentItem {
-  incident_id: string;
-  severity: string;
-  status: string;
-  service: string;
-  summary: string;
-  actions_taken: string[];
-  detected_at: string;
-  resolved_at: string | null;
-}
+import { IncidentItem } from "@/lib/api";
 
 interface IncidentPanelProps {
   incidents: IncidentItem[];
   onResolve: (incidentId: string) => void;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
-export const IncidentPanel: React.FC<IncidentPanelProps> = ({ incidents, onResolve }) => {
+export const IncidentPanel: React.FC<IncidentPanelProps> = ({ incidents, onResolve, isLoading, error }) => {
   const getSeverityBadge = (sev: string) => {
     switch (sev.toUpperCase()) {
       case "CRITICAL":
@@ -47,10 +39,15 @@ export const IncidentPanel: React.FC<IncidentPanelProps> = ({ incidents, onResol
         </span>
       </div>
 
-      {(!incidents || incidents.length === 0) ? (
+      {error ? (
+        <div className="text-center py-6 text-rose-400 text-xs border border-rose-500/30 rounded bg-rose-500/5">
+          <p className="font-semibold">Incident Telemetry Unavailable</p>
+          <p className="text-slate-400 font-mono mt-1">{error}</p>
+        </div>
+      ) : (!incidents || incidents.length === 0) ? (
         <div className="text-center py-6 text-slate-500 text-xs flex items-center justify-center gap-1.5">
           <CheckCircle className="w-4 h-4 text-emerald-500" />
-          <span>All services healthy. Zero active incidents reported.</span>
+          <span>{isLoading ? "Querying active system incidents..." : "All services healthy. Zero active incidents reported."}</span>
         </div>
       ) : (
         <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">

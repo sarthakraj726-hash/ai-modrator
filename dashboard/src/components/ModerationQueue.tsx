@@ -2,26 +2,16 @@
 
 import React from "react";
 import { Shield, Check, X, AlertOctagon } from "lucide-react";
-
-interface ReviewItem {
-  id: string;
-  creator_id: string;
-  author_display_name: string;
-  message_text: string;
-  status: string;
-  severity: number;
-  confidence: number;
-  recommended_action: string;
-  reason: string;
-  created_at: string;
-}
+import { ReviewItem } from "@/lib/api";
 
 interface ModerationQueueProps {
   reviews: ReviewItem[];
   onResolve: (reviewId: string, action: string) => void;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
-export const ModerationQueue: React.FC<ModerationQueueProps> = ({ reviews, onResolve }) => {
+export const ModerationQueue: React.FC<ModerationQueueProps> = ({ reviews, onResolve, isLoading, error }) => {
   return (
     <div className="cyber-panel p-5 space-y-4">
       <div className="flex items-center justify-between">
@@ -36,9 +26,14 @@ export const ModerationQueue: React.FC<ModerationQueueProps> = ({ reviews, onRes
         </span>
       </div>
 
-      {(!reviews || reviews.length === 0) ? (
+      {error ? (
+        <div className="text-center py-6 text-rose-400 text-xs border border-rose-500/30 rounded bg-rose-500/5">
+          <p className="font-semibold">Moderation Queue Unavailable</p>
+          <p className="text-slate-400 font-mono mt-1">{error}</p>
+        </div>
+      ) : (!reviews || reviews.length === 0) ? (
         <div className="text-center py-8 text-slate-500 text-xs">
-          No pending moderation reviews. All stream chats are safe.
+          {isLoading ? "Fetching pending moderation tickets..." : "No pending moderation reviews. All stream chats are safe."}
         </div>
       ) : (
         <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
