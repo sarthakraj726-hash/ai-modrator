@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,6 +90,20 @@ class Settings(BaseSettings):
         if upper_v not in valid_levels:
             return "INFO"
         return upper_v
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def normalize_db_url_field(cls, v: str) -> str:
+        from app.core.database_url import normalize_database_url
+
+        return normalize_database_url(v, app_env="development")
+
+    @model_validator(mode="after")
+    def validate_production_database(self) -> "Settings":
+        from app.core.database_url import normalize_database_url
+
+        self.DATABASE_URL = normalize_database_url(self.DATABASE_URL, app_env=self.APP_ENV)
+        return self
 
     @property
     def youtube_api_keys(self) -> list[str]:

@@ -76,7 +76,7 @@ class StreamIntelligenceCoordinator:
             xp_manager=self.xp_manager,
             game_engine=self.game_engine,
         )
-        self.session_factory = session_factory or get_session_factory()
+        self._session_factory = session_factory
 
         # Per-stream recent message sliding history: stream_id -> list of texts
         self._recent_chat_history: dict[str, list[str]] = {}
@@ -85,6 +85,16 @@ class StreamIntelligenceCoordinator:
         self._creator_personas: dict[str, PersonaProfile] = {}
 
         self._started = False
+
+    @property
+    def session_factory(self) -> Any:
+        if self._session_factory is None:
+            self._session_factory = get_session_factory()
+        return self._session_factory
+
+    @session_factory.setter
+    def session_factory(self, val: Any) -> None:
+        self._session_factory = val
 
     async def start(self) -> None:
         """Register event listeners."""

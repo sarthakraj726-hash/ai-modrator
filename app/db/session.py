@@ -24,7 +24,9 @@ def get_engine() -> AsyncEngine:
     global _engine, _session_factory
     if _engine is None:
         settings = get_settings()
-        db_url = settings.DATABASE_URL
+        from app.core.database_url import normalize_database_url
+
+        db_url = normalize_database_url(settings.DATABASE_URL, app_env=settings.APP_ENV)
 
         # Enable proper pooling options based on database type
         engine_kwargs = {
@@ -55,6 +57,11 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
         get_engine()
     assert _session_factory is not None
     return _session_factory
+
+
+def async_session_maker() -> AsyncSession:
+    """Return a new AsyncSession instance from the global session factory."""
+    return get_session_factory()()
 
 
 async def init_db_engine() -> None:

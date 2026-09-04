@@ -3,7 +3,7 @@
 import re
 import time
 
-from app.cache.redis import RedisClient, get_redis_client
+from app.cache.redis import RedisClient, get_redis_sync
 from app.moderation.models import ModerationAction, ModerationDecision, ModerationLayer
 
 
@@ -14,7 +14,7 @@ class BehavioralSpamDetector:
     """
 
     def __init__(self, redis_client: RedisClient | None = None) -> None:
-        self.redis_client = redis_client or get_redis_client()
+        self.redis_client = redis_client or get_redis_sync()
         self._local_history: dict[str, list[tuple[str, float]]] = {}
 
     async def evaluate_spam_signals(
