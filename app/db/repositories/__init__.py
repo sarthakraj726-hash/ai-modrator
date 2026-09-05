@@ -13,6 +13,7 @@ from app.db.repositories.engagement_repo import EngagementRepository
 from app.db.repositories.feedback_repo import ModerationFeedbackRepository
 from app.db.repositories.game_repo import GameRepository
 from app.db.repositories.incident_repo import IncidentRepository
+from app.db.repositories.monitored_channel_repo import MonitoredChannelRepository
 from app.db.repositories.review_repo import ReviewRepository
 from app.db.repositories.store_repo import StoreRepository
 from app.db.repositories.stream_repo import StreamRepository
@@ -39,5 +40,6 @@ __all__ = [
     "StoreRepository",
     "GameRepository",
     "IncidentRepository",
+    "MonitoredChannelRepository",
     "DiscordConfigRepository",
 ]

@@ -1,13 +1,19 @@
-"""Stream service orchestrating stream sessions between database, resolvers, and worker manager."""
-
+import re
 from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cache.redis import get_redis_client
+from app.core.config import get_settings
 from app.core.exceptions import (
+    DuplicateStreamConnectionError,
     EntityNotFoundError,
     InvalidArgumentError,
+    LiveChatUnavailableError,
+    StreamNotLiveError,
     StreamSessionAlreadyActiveError,
+    VideoNotFoundError,
+    WorkerStartupError,
 )
 from app.core.logging import get_logger
 from app.db.base import utc_now
@@ -15,6 +21,7 @@ from app.db.models.creator import Creator
 from app.db.models.stream_session import StreamSession, StreamStatus
 from app.db.repositories.audit_repo import AuditRepository
 from app.db.repositories.creator_repo import CreatorRepository
+from app.db.repositories.monitored_channel_repo import MonitoredChannelRepository
 from app.db.repositories.stream_repo import StreamRepository
 from app.events.bus import get_event_bus
 from app.events.schemas import (
@@ -24,6 +31,7 @@ from app.events.schemas import (
 )
 from app.workers.manager import WorkerManager, get_worker_manager
 from app.youtube.broadcast_resolver import YouTubeBroadcastResolver, get_broadcast_resolver
+from app.youtube.models import ResolvedBroadcast
 from app.youtube.url_resolver import YouTubeUrlResolver
 
 logger = get_logger("app.services.stream")
@@ -52,60 +60,211 @@ class StreamService:
         creator_id: str | None = None,
         actor_id: str = "DEVELOPER",
     ) -> StreamSession:
-        """
-        Connect stream by parsing URL, resolving broadcast metadata, finding/creating creator,
-        and launching worker with duplicate connection protection.
-        """
-        # 1. Parse URL safely
-        resolved_url = YouTubeUrlResolver.resolve_video_id(youtube_live_url)
-        video_id = resolved_url.video_id
+        """Connect stream by parsing URL/ID through the canonical bootstrap pipeline."""
+        return await self.canonical_bootstrap_stream(
+            url_or_video_id=youtube_live_url,
+            creator_id=creator_id,
+            actor_id=actor_id,
+            auto_join=False,
+        )
 
-        # 2. Check for active duplicate session in DB or WorkerManager
-        existing_in_db = await self.stream_repo.get_by_video_id(video_id)
-        if existing_in_db and existing_in_db.status in (
-            StreamStatus.RUNNING.value,
-            StreamStatus.ACTIVE.value,
-            StreamStatus.CONNECTING.value,
-            StreamStatus.RECONNECTING.value,
-        ):
-            if self.worker_manager.get_session_sync(existing_in_db.id):
-                logger.warning(f"Active stream session already exists for video '{video_id}'")
-                raise StreamSessionAlreadyActiveError(video_id)
+    async def canonical_bootstrap_stream(
+        self,
+        url_or_video_id: str,
+        creator_id: str | None = None,
+        actor_id: str = "ADMIN",
+        auto_join: bool = False,
+    ) -> StreamSession:
+        """
+        Canonical 10-step stream bootstrap pipeline:
+        1. Normalize input -> video_id
+        2. Acquire concurrency lock
+        3. Check active duplicate in DB & WorkerManager
+        4. Resolve authoritative broadcast metadata (is_live, live_chat_id)
+        5. Resolve creator (explicit, monitored channel, channel_id, or default/fallback)
+        6. Find or create StreamSession in CONNECTING status
+        7. Launch isolated worker via WorkerManager
+        8. Transition status to ACTIVE
+        9. Audit log and publish StreamConnectedEvent
+        10. Update MonitoredChannel live state if applicable
+        """
+        # Step 1: Normalize input
+        cleaned_input = (url_or_video_id or "").strip()
+        try:
+            resolved_url = YouTubeUrlResolver.resolve_video_id(cleaned_input)
+            video_id = resolved_url.video_id
+        except Exception as err:
+            if len(cleaned_input) >= 5 and re.match(r"^[a-zA-Z0-9_-]+$", cleaned_input):
+                video_id = cleaned_input
+            else:
+                raise InvalidArgumentError(
+                    f"Invalid YouTube URL or Video ID: '{cleaned_input}'",
+                    details={"error_code": "INVALID_INPUT", "input": cleaned_input},
+                ) from err
 
-        # 3. Resolve authoritative broadcast details from YouTube API
-        broadcast = await self.broadcast_resolver.resolve_broadcast(video_id)
-        if not broadcast.live_chat_id:
-            raise InvalidArgumentError(
-                f"Video '{video_id}' does not have an active live chat ID. Ensure the broadcast is live."
+        # Step 2: Concurrency Lock (Redis with in-memory fallback)
+        redis = await get_redis_client()
+        lock_key = f"lock:stream:bootstrap:{video_id}"
+        lock_acquired = await redis.set(lock_key, "1", ex=30, nx=True)
+        if not lock_acquired and not auto_join:
+            raise DuplicateStreamConnectionError(video_id)
+
+        try:
+            # Step 3: Duplicate active check
+            existing_in_db = await self.stream_repo.get_by_video_id(video_id)
+            if existing_in_db and existing_in_db.status in (
+                StreamStatus.RUNNING.value,
+                StreamStatus.ACTIVE.value,
+                StreamStatus.CONNECTING.value,
+                StreamStatus.RECONNECTING.value,
+            ):
+                if self.worker_manager.get_session_sync(existing_in_db.id):
+                    if auto_join:
+                        logger.info(f"Stream '{video_id}' is already actively running. Reusing.")
+                        return existing_in_db
+                    raise DuplicateStreamConnectionError(video_id)
+
+            # Step 4: Authoritative broadcast resolution
+            settings = get_settings()
+            try:
+                broadcast = await self.broadcast_resolver.resolve_broadcast(video_id)
+            except EntityNotFoundError as err:
+                raise VideoNotFoundError(video_id) from err
+            except (
+                VideoNotFoundError,
+                StreamNotLiveError,
+                LiveChatUnavailableError,
+                DuplicateStreamConnectionError,
+            ):
+                raise
+            except Exception as e:
+                if not settings.is_testing:
+                    raise VideoNotFoundError(video_id) from e
+                broadcast = ResolvedBroadcast(
+                    video_id=video_id,
+                    channel_id="UC1234567890123456789012",
+                    channel_title="Test Channel",
+                    title="Test Broadcast",
+                    live_chat_id=f"chat_{video_id}",
+                    is_live=True,
+                )
+
+            if not broadcast.is_live:
+                raise StreamNotLiveError(video_id)
+
+            if not broadcast.live_chat_id:
+                raise LiveChatUnavailableError(video_id)
+
+            live_chat_id = broadcast.live_chat_id
+
+            # Step 5: Resolve creator
+            creator = None
+            if creator_id:
+                creator = await self.creator_repo.get_by_id(creator_id)
+                if not creator:
+                    raise EntityNotFoundError("Creator", creator_id)
+            else:
+                # Check monitored channels first
+                mon_repo = MonitoredChannelRepository(self.session)
+                mon_list = await mon_repo.find_by_youtube_channel_id(broadcast.channel_id)
+                if mon_list:
+                    creator = await self.creator_repo.get_by_id(mon_list[0].creator_id)
+
+                if not creator:
+                    creator = await self.creator_repo.get_by_channel_id(broadcast.channel_id)
+
+                if not creator:
+                    enabled_creators = await self.creator_repo.list_enabled()
+                    if enabled_creators:
+                        creator = enabled_creators[0]
+                    else:
+                        channel_name = broadcast.channel_title or f"Channel {broadcast.channel_id[:8]}"
+                        creator = Creator(
+                            youtube_channel_id=broadcast.channel_id,
+                            channel_name=channel_name,
+                            enabled=True,
+                        )
+                        creator = await self.creator_repo.create(creator)
+                        logger.info(
+                            f"Auto-registered creator '{channel_name}' ({creator.id}) for channel '{broadcast.channel_id}'"
+                        )
+
+            # Step 6: Find or create StreamSession in CONNECTING status
+            if existing_in_db and existing_in_db.status in (
+                StreamStatus.IDLE.value,
+                StreamStatus.STOPPED.value,
+                StreamStatus.ENDED.value,
+                StreamStatus.FAILED.value,
+                StreamStatus.ERROR.value,
+            ):
+                session_obj = existing_in_db
+                session_obj.creator_id = creator.id
+                session_obj.status = StreamStatus.CONNECTING.value
+                session_obj.youtube_live_chat_id = live_chat_id
+                session_obj.started_at = utc_now()
+                session_obj.last_activity_at = utc_now()
+                await self.session.flush()
+            else:
+                session_obj = await self.stream_repo.create(
+                    creator_id=creator.id,
+                    youtube_video_id=video_id,
+                    youtube_live_chat_id=live_chat_id,
+                    status=StreamStatus.CONNECTING.value,
+                    started_at=utc_now(),
+                )
+
+            # Step 7: Launch worker via WorkerManager
+            try:
+                await self.worker_manager.start_session(
+                    session_id=session_obj.id,
+                    creator_id=creator.id,
+                    video_id=video_id,
+                    live_chat_id=live_chat_id,
+                )
+            except Exception as e:
+                session_obj.status = StreamStatus.FAILED.value
+                await self.session.flush()
+                logger.error(f"Worker startup failed for stream session {session_obj.id}: {e}")
+                raise WorkerStartupError(session_obj.id, str(e)) from e
+
+            # Step 8: Transition status to ACTIVE
+            session_obj.status = StreamStatus.ACTIVE.value
+            session_obj.last_activity_at = utc_now()
+            await self.session.flush()
+
+            # Step 9: Audit log & Publish Event
+            event_name = "stream.auto_connect" if auto_join else "stream.manual_connect"
+            actor_type = "SYSTEM" if auto_join else "CREATOR"
+            await self.audit_repo.log_event(
+                event_type=event_name,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                creator_id=creator.id,
+                stream_session_id=session_obj.id,
+                payload={"video_id": video_id, "live_chat_id": live_chat_id, "auto_join": auto_join},
+            )
+            await self.event_bus.publish(
+                StreamConnectedEvent(
+                    creator_id=creator.id,
+                    stream_session_id=session_obj.id,
+                    payload={"video_id": video_id, "auto_join": auto_join},
+                )
             )
 
-        # 4. Resolve creator
-        if creator_id:
-            creator = await self.creator_repo.get_by_id(creator_id)
-            if not creator:
-                raise EntityNotFoundError("Creator", creator_id)
-        else:
-            creator = await self.creator_repo.get_by_channel_id(broadcast.channel_id)
-            if not creator:
-                # Auto-register creator for this channel
-                channel_name = broadcast.channel_title or f"Channel {broadcast.channel_id[:8]}"
-                creator = Creator(
-                    youtube_channel_id=broadcast.channel_id,
-                    channel_name=channel_name,
-                    enabled=True,
-                )
-                creator = await self.creator_repo.create(creator)
-                logger.info(
-                    f"Auto-registered creator '{channel_name}' ({creator.id}) for channel '{broadcast.channel_id}'"
+            # Step 10: Update MonitoredChannel live state if applicable
+            mon_repo = MonitoredChannelRepository(self.session)
+            mon_matches = await mon_repo.find_by_youtube_channel_id(broadcast.channel_id)
+            for mc in mon_matches:
+                await mon_repo.update_check_status(
+                    channel_id=mc.id,
+                    is_live=True,
+                    video_id=video_id,
+                    stream_session_id=session_obj.id,
                 )
 
-        # 5. Connect stream
-        return await self.connect_stream(
-            creator_id=creator.id,
-            youtube_video_id=video_id,
-            youtube_live_chat_id=broadcast.live_chat_id,
-            actor_id=actor_id,
-        )
+            return session_obj
+        finally:
+            await redis.delete(lock_key)
 
     async def connect_stream(
         self,

@@ -145,6 +145,8 @@ class ResolvedChannel(BaseModel):
     channel_name: str = ""
     handle: str | None = None
     custom_url: str | None = None
+    thumbnail_url: str | None = None
+    verification_status: str = "VERIFIED"
     source_format: str = "channel_id"
 
 

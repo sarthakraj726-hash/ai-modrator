@@ -12,7 +12,6 @@ from sqlalchemy import desc, func, select
 
 from app.api.dependencies import AdminUserDep, DBSessionDep
 from app.api.sse import get_sse_broadcaster
-from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.models.audit_event import AuditEvent
 from app.db.models.creator import Creator
@@ -20,19 +19,20 @@ from app.db.models.discord_config import CreatorDiscordConfig
 from app.db.models.economy import EconomyAccount
 from app.db.models.incident import Incident
 from app.db.models.moderation_review import ModerationReview
+from app.db.models.monitored_channel import MonitoredChannel
 from app.db.models.stream_session import (
     StreamSession,
     StreamStatus,
 )
 from app.db.models.websub_subscription import WebSubSubscription
 from app.db.repositories.audit_repo import AuditRepository
+from app.db.repositories.monitored_channel_repo import MonitoredChannelRepository
 from app.services.feature_flags import FeatureFlagService
 from app.services.health_monitor import HealthMonitorService, get_health_supervisor
 from app.services.incidents import IncidentService
 from app.services.integrity import IntegrityCheckService
 from app.workers.manager import get_worker_manager
 from app.youtube.quota import get_quota_manager
-from app.youtube.url_resolver import YouTubeUrlResolver
 
 logger = get_logger("app.api.routes.dashboard")
 
@@ -59,6 +59,19 @@ class StreamControlRequest(BaseModel):
 class ManualConnectRequest(BaseModel):
     url_or_video_id: str
     creator_id: str | None = None
+
+
+class MonitoredChannelCreateRequest(BaseModel):
+    identifier: str
+    display_label: str | None = None
+    auto_join_enabled: bool = True
+    creator_id: str | None = None
+
+
+class MonitoredChannelUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    auto_join_enabled: bool | None = None
+    display_label: str | None = None
 
 
 class CreatorCreateRequest(BaseModel):
@@ -351,155 +364,272 @@ async def manual_connect_stream(
     db: DBSessionDep,
     admin: AdminUserDep,
 ) -> dict[str, Any]:
-    # 1. Resolve video ID safely
+    from app.core.exceptions import AppException
+    from app.services.stream_service import StreamService
+
+    stream_svc = StreamService(session=db)
     try:
-        resolved = YouTubeUrlResolver.resolve_video_id(req.url_or_video_id)
-        video_id = resolved.video_id
-    except Exception as e:
-        video_id = req.url_or_video_id.strip()
-        if len(video_id) < 5:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid YouTube URL or Video ID: {e}",
-            ) from e
-
-    # 2. Check for existing active connection
-    dup_stmt = select(StreamSession).where(
-        StreamSession.youtube_video_id == video_id,
-        StreamSession.status.in_(
-            [
-                StreamStatus.ACTIVE.value,
-                StreamStatus.RUNNING.value,
-                StreamStatus.CONNECTING.value,
-            ]
-        ),
-    )
-    dup_res = await db.execute(dup_stmt)
-    if dup_res.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Video '{video_id}' is already actively connected",
+        session_obj = await stream_svc.canonical_bootstrap_stream(
+            url_or_video_id=req.url_or_video_id,
+            creator_id=req.creator_id,
+            actor_id=admin.user_id,
+            auto_join=False,
         )
+        return {
+            "status": session_obj.status,
+            "stream_session_id": session_obj.id,
+            "creator_id": session_obj.creator_id,
+            "video_id": session_obj.youtube_video_id,
+            "live_chat_id": session_obj.youtube_live_chat_id,
+        }
+    except AppException as e:
+        headers = {}
+        if hasattr(e, "details") and isinstance(e.details, dict) and "error_code" in e.details:
+            headers["X-Error-Code"] = e.details["error_code"]
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message,
+            headers=headers,
+        ) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Manual connect unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to connect stream: {e}",
+        ) from e
 
-    # 3. Find creator (or auto-provision if none exists)
+
+# --- 2b. Monitored YouTube Channels Registry & Auto-Join ---
+@router.get("/monitored-channels", summary="List Monitored YouTube Channels")
+async def list_monitored_channels(
+    db: DBSessionDep,
+    admin: AdminUserDep,
+    creator_id: str | None = None,
+) -> list[dict[str, Any]]:
+    mon_repo = MonitoredChannelRepository(db)
+    if creator_id:
+        channels = await mon_repo.list_by_creator(creator_id)
+    else:
+        stmt = select(MonitoredChannel).order_by(MonitoredChannel.created_at.desc())
+        res = await db.execute(stmt)
+        channels = res.scalars().all()
+
+    results = []
+    for ch in channels:
+        c_stmt = select(Creator.channel_name).where(Creator.id == ch.creator_id)
+        c_res = await db.execute(c_stmt)
+        c_name = c_res.scalar_one_or_none() or "Unknown Creator"
+
+        results.append(
+            {
+                "id": ch.id,
+                "creator_id": ch.creator_id,
+                "creator_name": c_name,
+                "youtube_channel_id": ch.youtube_channel_id,
+                "channel_name": ch.channel_name,
+                "channel_handle": ch.channel_handle,
+                "display_label": ch.display_label,
+                "thumbnail_url": ch.thumbnail_url,
+                "enabled": ch.enabled,
+                "auto_join_enabled": ch.auto_join_enabled,
+                "verification_status": ch.verification_status,
+                "last_verified_at": ch.last_verified_at.isoformat() if ch.last_verified_at else None,
+                "last_checked_at": ch.last_checked_at.isoformat() if ch.last_checked_at else None,
+                "last_seen_live_at": ch.last_seen_live_at.isoformat() if ch.last_seen_live_at else None,
+                "last_seen_video_id": ch.last_seen_video_id,
+                "last_connected_stream_session_id": ch.last_connected_stream_session_id,
+                "last_error_code": ch.last_error_code,
+                "last_error_message_safe": ch.last_error_message_safe,
+                "created_at": ch.created_at.isoformat() if ch.created_at else None,
+            }
+        )
+    return results
+
+
+@router.post("/monitored-channels", summary="Add and Verify Monitored YouTube Channel")
+async def add_monitored_channel(
+    req: MonitoredChannelCreateRequest,
+    db: DBSessionDep,
+    admin: AdminUserDep,
+) -> dict[str, Any]:
+    from app.core.exceptions import ChannelNotFoundError
+    from app.youtube.channel_resolver import ChannelIdentifierResolver
+
+    # 1. Authoritative YouTube Channel verification
+    try:
+        verified = await ChannelIdentifierResolver.verify_channel(req.identifier)
+    except ChannelNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"YouTube channel '{req.identifier}' was not found.",
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Channel verification failed: {e}",
+        ) from e
+
+    # 2. Resolve creator
     creator = None
     if req.creator_id:
         c_stmt = select(Creator).where(Creator.id == req.creator_id)
         c_res = await db.execute(c_stmt)
         creator = c_res.scalar_one_or_none()
+        if not creator:
+            raise HTTPException(status_code=404, detail=f"Creator '{req.creator_id}' not found.")
     else:
-        c_stmt = select(Creator).where(Creator.enabled.is_(True)).limit(1)
+        c_stmt = select(Creator).where(Creator.youtube_channel_id == verified.channel_id)
         c_res = await db.execute(c_stmt)
         creator = c_res.scalar_one_or_none()
+        if not creator:
+            c_stmt2 = select(Creator).where(Creator.enabled.is_(True)).limit(1)
+            c_res2 = await db.execute(c_stmt2)
+            creator = c_res2.scalar_one_or_none()
+        if not creator:
+            creator = Creator(
+                id="default-creator",
+                youtube_channel_id=verified.channel_id,
+                channel_name=verified.channel_name,
+                enabled=True,
+            )
+            db.add(creator)
+            await db.flush()
 
-    if not creator:
-        # Auto-provision default creator so connecting a stream always works out-of-the-box
-        creator = Creator(
-            id="default-creator",
-            youtube_channel_id=f"channel_{video_id}",
-            channel_name="Primary Streamer",
-            enabled=True,
-        )
-        db.add(creator)
-        await db.flush()
-        logger.info(f"Auto-provisioned default creator '{creator.channel_name}' for stream connect")
-
-    # 4. Authoritative YouTube Broadcast resolution
-    settings = get_settings()
-    from unittest.mock import Mock
-
-    from app.core.exceptions import EntityNotFoundError, YouTubeAPIError
-    from app.youtube.broadcast_resolver import YouTubeBroadcastResolver
-
-    resolver = YouTubeBroadcastResolver()
-    broadcast = None
-    if not settings.is_testing or isinstance(resolver.resolve_broadcast, Mock):
-        try:
-            broadcast = await resolver.resolve_broadcast(video_id)
-            if not broadcast.is_live:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"YouTube video '{video_id}' is not currently an active live stream",
-                )
-            if not broadcast.active_live_chat_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No active live chat found for stream '{video_id}'",
-                )
-        except HTTPException:
-            raise
-        except EntityNotFoundError as e:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"YouTube video '{video_id}' was not found. Please verify the URL or Video ID.",
-            ) from e
-        except YouTubeAPIError as e:
-            raise HTTPException(
-                status_code=e.status_code
-                if e.status_code and e.status_code < 500
-                else status.HTTP_502_BAD_GATEWAY,
-                detail=f"YouTube API error: {e.message}",
-            ) from e
-        except Exception as e:
-            logger.warning(f"Authoritative broadcast check warning: {e}")
-
-    live_chat_id = (
-        broadcast.active_live_chat_id
-        if (broadcast and broadcast.active_live_chat_id)
-        else f"chat_{video_id}"
-    )
-
-    # 5. Create stream session in CONNECTING status
-    session_obj = StreamSession(
-        creator_id=creator.id,
-        youtube_video_id=video_id,
-        youtube_live_chat_id=live_chat_id,
-        status=StreamStatus.CONNECTING.value,
-        started_at=datetime.now(UTC),
-        last_activity_at=datetime.now(UTC),
-    )
-    db.add(session_obj)
-    await db.flush()
-
-    # 6. Start isolated stream worker session
-    worker_mgr = get_worker_manager()
-    try:
-        await worker_mgr.start_session(
-            session_id=session_obj.id,
-            creator_id=creator.id,
-            video_id=video_id,
-            live_chat_id=session_obj.youtube_live_chat_id,
-        )
-    except Exception as e:
-        session_obj.status = StreamStatus.FAILED.value
-        await db.flush()
-        logger.error(f"Worker startup failed for stream session {session_obj.id}: {e}")
+    # 3. Duplicate check for creator
+    mon_repo = MonitoredChannelRepository(db)
+    existing = await mon_repo.get_by_channel_id(creator.id, verified.channel_id)
+    if existing:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Worker startup failed: {e}",
-        ) from e
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Channel '{verified.channel_name}' ({verified.channel_id}) is already being monitored for this creator.",
+        )
 
-    session_obj.status = StreamStatus.ACTIVE.value
-    await db.flush()
+    # 4. Persist MonitoredChannel
+    mon_channel = MonitoredChannel(
+        creator_id=creator.id,
+        youtube_channel_id=verified.channel_id,
+        channel_name=verified.channel_name,
+        channel_handle=verified.handle,
+        display_label=req.display_label or verified.channel_name,
+        thumbnail_url=verified.thumbnail_url,
+        enabled=True,
+        auto_join_enabled=req.auto_join_enabled,
+        verification_status="VERIFIED",
+        last_verified_at=datetime.now(UTC),
+    )
+    mon_channel = await mon_repo.create(mon_channel)
 
-    # 7. Audit log the manual connect
+    # 5. Audit log
     audit_repo = AuditRepository(db)
     await audit_repo.log_event(
-        event_type="stream.manual_connect",
+        event_type="monitored_channel.created",
         actor_type="ADMIN",
         actor_id=admin.user_id,
         creator_id=creator.id,
-        stream_session_id=session_obj.id,
-        payload={"video_id": video_id, "live_chat_id": live_chat_id, "status": "ACTIVE"},
+        payload={"youtube_channel_id": verified.channel_id, "channel_name": verified.channel_name},
     )
 
     return {
-        "status": "ACTIVE",
-        "stream_session_id": session_obj.id,
-        "creator_id": creator.id,
-        "video_id": video_id,
-        "live_chat_id": live_chat_id,
+        "id": mon_channel.id,
+        "creator_id": mon_channel.creator_id,
+        "youtube_channel_id": mon_channel.youtube_channel_id,
+        "channel_name": mon_channel.channel_name,
+        "channel_handle": mon_channel.channel_handle,
+        "display_label": mon_channel.display_label,
+        "thumbnail_url": mon_channel.thumbnail_url,
+        "enabled": mon_channel.enabled,
+        "auto_join_enabled": mon_channel.auto_join_enabled,
+        "verification_status": mon_channel.verification_status,
+        "created_at": mon_channel.created_at.isoformat() if mon_channel.created_at else None,
     }
+
+
+@router.patch("/monitored-channels/{id}", summary="Update Monitored Channel Settings")
+async def update_monitored_channel(
+    id: str,
+    req: MonitoredChannelUpdateRequest,
+    db: DBSessionDep,
+    admin: AdminUserDep,
+) -> dict[str, Any]:
+    mon_repo = MonitoredChannelRepository(db)
+    channel = await mon_repo.get_by_id(id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Monitored channel not found.")
+
+    if req.enabled is not None:
+        channel.enabled = req.enabled
+    if req.auto_join_enabled is not None:
+        channel.auto_join_enabled = req.auto_join_enabled
+    if req.display_label is not None:
+        channel.display_label = req.display_label
+
+    await db.flush()
+
+    audit_repo = AuditRepository(db)
+    await audit_repo.log_event(
+        event_type="monitored_channel.updated",
+        actor_type="ADMIN",
+        actor_id=admin.user_id,
+        creator_id=channel.creator_id,
+        payload={"monitored_channel_id": id, "enabled": channel.enabled, "auto_join": channel.auto_join_enabled},
+    )
+
+    return {
+        "id": channel.id,
+        "enabled": channel.enabled,
+        "auto_join_enabled": channel.auto_join_enabled,
+        "display_label": channel.display_label,
+    }
+
+
+@router.delete("/monitored-channels/{id}", summary="Delete Monitored Channel")
+async def delete_monitored_channel(
+    id: str,
+    db: DBSessionDep,
+    admin: AdminUserDep,
+) -> dict[str, Any]:
+    mon_repo = MonitoredChannelRepository(db)
+    channel = await mon_repo.get_by_id(id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Monitored channel not found.")
+
+    creator_id = channel.creator_id
+    channel_name = channel.channel_name
+    await db.delete(channel)
+    await db.flush()
+
+    audit_repo = AuditRepository(db)
+    await audit_repo.log_event(
+        event_type="monitored_channel.deleted",
+        actor_type="ADMIN",
+        actor_id=admin.user_id,
+        creator_id=creator_id,
+        payload={"monitored_channel_id": id, "channel_name": channel_name},
+    )
+
+    return {"status": "DELETED", "id": id}
+
+
+@router.post("/monitored-channels/{id}/check-now", summary="Force Live Check on Monitored Channel")
+async def check_monitored_channel_now(
+    id: str,
+    db: DBSessionDep,
+    admin: AdminUserDep,
+) -> dict[str, Any]:
+    from app.db.session import get_session_factory
+    from app.services.monitored_channel_coordinator import get_monitored_channel_coordinator
+
+    mon_repo = MonitoredChannelRepository(db)
+    channel = await mon_repo.get_by_id(id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Monitored channel not found.")
+
+    coordinator = get_monitored_channel_coordinator()
+    session_factory = get_session_factory()
+    result = await coordinator.check_channel(channel_record_id=id, session_maker=session_factory)
+    return result
 
 
 # --- 3. Creator Registry ---

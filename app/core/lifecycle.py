@@ -89,10 +89,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Failed to start HealthMonitorSupervisor: {e}")
 
+    # 6. Initialize Monitored Channel Coordinator (Worker or Unified mode)
+    monitored_coordinator = None
+    if settings.is_worker_service and not settings.is_testing:
+        from app.db.session import get_session_factory
+        from app.services.monitored_channel_coordinator import get_monitored_channel_coordinator
+
+        monitored_coordinator = get_monitored_channel_coordinator()
+        session_factory = get_session_factory()
+        await monitored_coordinator.start(session_factory)
+        logger.info("MonitoredChannelCoordinator started for live stream auto-join")
+
     yield
 
     # Shutdown Phase
     logger.info("Initiating graceful application shutdown...")
+
+    # Stop Monitored Channel Coordinator
+    if monitored_coordinator:
+        try:
+            await monitored_coordinator.stop()
+            logger.info("MonitoredChannelCoordinator stopped")
+        except Exception as e:
+            logger.error(f"Error stopping monitored coordinator: {e}")
 
     # Stop Health Monitor Supervisor
     try:

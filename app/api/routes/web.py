@@ -318,6 +318,7 @@ def render_control_center_html(environment: str, version: str) -> str:
           <button class="btn btn-secondary" onclick="saveAdminSecret()" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;">Set</button>
         </div>
 
+        <button class="btn btn-secondary" onclick="openAddChannelModal()" style="border-color: rgba(168, 85, 247, 0.4); color: #d8b4fe;">+ Add Channel</button>
         <button class="btn btn-primary" onclick="openConnectModal()">+ Connect Stream</button>
       </div>
     </div>
@@ -370,6 +371,7 @@ def render_control_center_html(environment: str, version: str) -> str:
         <span style="color: var(--text-muted); font-weight: 700;">API STATUS:</span>
         <span id="diag-overview" class="badge">overview: ...</span>
         <span id="diag-streams" class="badge">streams: ...</span>
+        <span id="diag-channels" class="badge">channels: ...</span>
         <span id="diag-quota" class="badge">quota: ...</span>
         <span id="diag-keys" class="badge">keys: ...</span>
         <span id="diag-moderation" class="badge">moderation: ...</span>
@@ -390,6 +392,22 @@ def render_control_center_html(environment: str, version: str) -> str:
       <div id="streams-container">
         <div style="text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.85rem;">
           Querying live streams telemetry...
+        </div>
+      </div>
+    </div>
+
+    <!-- Section: Monitored YouTube Channels & Auto-Join -->
+    <div class="panel" style="margin-bottom: 1.5rem;">
+      <div class="panel-header">
+        <div class="panel-title"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--purple);"></span> Monitored YouTube Channels & Auto-Join</div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <span id="monitored-channel-badge" class="badge badge-ok">0 MONITORED</span>
+          <button class="btn btn-secondary" onclick="openAddChannelModal()" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">+ Add Channel</button>
+        </div>
+      </div>
+      <div id="monitored-channels-container">
+        <div style="text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.85rem;">
+          Querying monitored channels...
         </div>
       </div>
     </div>
@@ -452,11 +470,35 @@ def render_control_center_html(environment: str, version: str) -> str:
     <div class="modal">
       <h3 style="margin-bottom: 0.5rem; font-size: 1rem;">Connect Live Stream</h3>
       <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1rem;">Enter a YouTube Live Stream URL or Video ID to allocate an isolated worker.</p>
+      <div id="connect-error-box" class="banner banner-danger" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem; word-break: break-word;"></div>
       <label style="font-size: 0.75rem; font-family: monospace;">YouTube Live URL or Video ID:</label>
       <input type="text" id="modal-stream-url" class="input-field" placeholder="https://www.youtube.com/watch?v=..." />
       <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
         <button class="btn btn-secondary" onclick="closeConnectModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitManualConnect()">Connect Stream</button>
+        <button class="btn btn-primary" id="btn-submit-connect" onclick="submitManualConnect()">Connect Stream</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Monitored Channel Modal -->
+  <div id="add-channel-modal" class="modal-overlay">
+    <div class="modal">
+      <h3 style="margin-bottom: 0.5rem; font-size: 1rem;">Add Monitored YouTube Channel</h3>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Add a YouTube Channel (UC... ID, @handle, or URL) to automatically detect and auto-join live broadcasts.
+      </p>
+      <div id="add-channel-error" class="banner banner-danger" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem; word-break: break-word;"></div>
+      <label style="font-size: 0.75rem; font-family: monospace;">Channel ID (UC...), @Handle, or Channel URL:</label>
+      <input type="text" id="modal-channel-identifier" class="input-field" placeholder="UC... or @CreatorHandle" />
+      <label style="font-size: 0.75rem; font-family: monospace;">Display Label (Optional):</label>
+      <input type="text" id="modal-channel-label" class="input-field" placeholder="e.g. Main Gaming Channel" />
+      <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+        <input type="checkbox" id="modal-channel-autojoin" checked style="accent-color: #a855f7;" />
+        <label for="modal-channel-autojoin" style="font-size: 0.75rem; cursor: pointer;">Automatically join stream when live broadcast detected</label>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+        <button class="btn btn-secondary" onclick="closeAddChannelModal()">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-channel" onclick="submitAddChannel()">Verify & Add</button>
       </div>
     </div>
   </div>
@@ -485,15 +527,137 @@ def render_control_center_html(environment: str, version: str) -> str:
     }}
 
     function openConnectModal() {{
+      document.getElementById("connect-error-box").style.display = "none";
       document.getElementById("connect-modal").style.display = "flex";
     }}
     function closeConnectModal() {{
       document.getElementById("connect-modal").style.display = "none";
     }}
 
+    function openAddChannelModal() {{
+      document.getElementById("add-channel-error").style.display = "none";
+      document.getElementById("modal-channel-identifier").value = "";
+      document.getElementById("modal-channel-label").value = "";
+      document.getElementById("modal-channel-autojoin").checked = true;
+      document.getElementById("add-channel-modal").style.display = "flex";
+    }}
+    function closeAddChannelModal() {{
+      document.getElementById("add-channel-modal").style.display = "none";
+    }}
+
+    async function submitAddChannel() {{
+      const identifier = document.getElementById("modal-channel-identifier").value.trim();
+      const label = document.getElementById("modal-channel-label").value.trim();
+      const autoJoin = document.getElementById("modal-channel-autojoin").checked;
+      const errBox = document.getElementById("add-channel-error");
+      const btn = document.getElementById("btn-submit-channel");
+      errBox.style.display = "none";
+
+      if (!identifier) {{
+        errBox.textContent = "Please enter a Channel ID (UC...), @Handle, or Channel URL.";
+        errBox.style.display = "block";
+        return;
+      }}
+
+      btn.disabled = true;
+      btn.textContent = "Verifying...";
+      try {{
+        const res = await fetch("/api/v1/dashboard/monitored-channels", {{
+          method: "POST",
+          headers: Object.assign({{ "Content-Type": "application/json" }}, getHeaders()),
+          body: JSON.stringify({{
+            identifier: identifier,
+            display_label: label || null,
+            auto_join_enabled: autoJoin
+          }})
+        }});
+        if (!res.ok) {{
+          let errMsg = "Verification failed (HTTP " + res.status + ")";
+          try {{
+            const err = await res.json();
+            errMsg = err.detail || (err.error && err.error.message) || errMsg;
+          }} catch (_) {{}}
+          errBox.textContent = errMsg;
+          errBox.style.display = "block";
+        }} else {{
+          closeAddChannelModal();
+          refreshDashboard();
+        }}
+      }} catch (e) {{
+        errBox.textContent = "Network error: " + e.message;
+        errBox.style.display = "block";
+      }} finally {{
+        btn.disabled = false;
+        btn.textContent = "Verify & Add";
+      }}
+    }}
+
+    async function toggleAutoJoin(channelId, currentVal) {{
+      try {{
+        const res = await fetch(`/api/v1/dashboard/monitored-channels/${{channelId}}`, {{
+          method: "PATCH",
+          headers: Object.assign({{ "Content-Type": "application/json" }}, getHeaders()),
+          body: JSON.stringify({{ auto_join_enabled: !currentVal }})
+        }});
+        if (res.ok) refreshDashboard();
+        else alert("Failed to toggle auto-join: HTTP " + res.status);
+      }} catch (e) {{
+        alert("Action failed: " + e.message);
+      }}
+    }}
+
+    async function checkChannelNow(channelId) {{
+      try {{
+        const res = await fetch(`/api/v1/dashboard/monitored-channels/${{channelId}}/check-now`, {{
+          method: "POST",
+          headers: Object.assign({{ "Content-Type": "application/json" }}, getHeaders()),
+          body: JSON.stringify({{}})
+        }});
+        const data = await res.json();
+        if (data.status === "LIVE_AUTO_JOINED") {{
+          alert("Live stream detected and worker auto-joined! Video ID: " + data.video_id);
+        }} else if (data.status === "ALREADY_ACTIVE") {{
+          alert("Stream is already active with running worker.");
+        }} else if (data.status === "OFFLINE") {{
+          alert("Channel is currently offline (no active live stream).");
+        }} else {{
+          alert("Check result: " + (data.status || JSON.stringify(data)));
+        }}
+        refreshDashboard();
+      }} catch (e) {{
+        alert("Check failed: " + e.message);
+      }}
+    }}
+
+    async function deleteMonitoredChannel(channelId) {{
+      if (!confirm("Are you sure you want to stop monitoring this channel?")) return;
+      try {{
+        const res = await fetch(`/api/v1/dashboard/monitored-channels/${{channelId}}`, {{
+          method: "DELETE",
+          headers: getHeaders()
+        }});
+        if (res.ok) refreshDashboard();
+        else alert("Failed to delete channel: HTTP " + res.status);
+      }} catch (e) {{
+        alert("Delete failed: " + e.message);
+      }}
+    }}
+
     async function submitManualConnect() {{
       const urlOrId = document.getElementById("modal-stream-url").value.trim();
-      if (!urlOrId) return alert("Please enter a URL or Video ID");
+      const errBox = document.getElementById("connect-error-box");
+      const btn = document.getElementById("btn-submit-connect");
+      errBox.style.display = "none";
+
+      if (!urlOrId) {{
+        errBox.textContent = "Please enter a URL or Video ID";
+        errBox.style.display = "block";
+        return;
+      }}
+
+      btn.disabled = true;
+      btn.textContent = "Connecting...";
+
       try {{
         const res = await fetch("/api/v1/dashboard/streams/manual-connect", {{
           method: "POST",
@@ -508,14 +672,19 @@ def render_control_center_html(environment: str, version: str) -> str:
           }} catch (_) {{
             msg = res.statusText || ("HTTP " + res.status);
           }}
-          alert("Connection failed: " + msg);
+          errBox.textContent = "Connection failed: " + msg;
+          errBox.style.display = "block";
         }} else {{
           closeConnectModal();
           document.getElementById("modal-stream-url").value = "";
           refreshDashboard();
         }}
       }} catch (e) {{
-        alert("Network error: " + e.message);
+        errBox.textContent = "Network error: " + e.message;
+        errBox.style.display = "block";
+      }} finally {{
+        btn.disabled = false;
+        btn.textContent = "Connect Stream";
       }}
     }}
 
@@ -584,9 +753,10 @@ def render_control_center_html(environment: str, version: str) -> str:
         }}
       }}
 
-      const [overview, streams, quota, keys, moderation, incidents] = await Promise.all([
+      const [overview, streams, channels, quota, keys, moderation, incidents] = await Promise.all([
         fetchApi("/api/v1/dashboard/overview", "diag-overview"),
         fetchApi("/api/v1/dashboard/streams", "diag-streams"),
+        fetchApi("/api/v1/dashboard/monitored-channels", "diag-channels"),
         fetchApi("/api/v1/dashboard/quota", "diag-quota"),
         fetchApi("/api/v1/dashboard/youtube-keys", "diag-keys"),
         fetchApi("/api/v1/dashboard/moderation?status_filter=PENDING", "diag-moderation"),
@@ -645,6 +815,48 @@ def render_control_center_html(environment: str, version: str) -> str:
             </div>
           </div>
         `).join("");
+      }}
+
+      // Monitored Channels
+      const chanArr = Array.isArray(channels) ? channels : [];
+      const mBadge = document.getElementById("monitored-channel-badge");
+      if (mBadge) mBadge.textContent = `${{chanArr.length}} MONITORED`;
+      const mcContainer = document.getElementById("monitored-channels-container");
+      if (mcContainer) {{
+        if (chanArr.length === 0) {{
+          mcContainer.innerHTML = `<div style="text-align: center; padding: 2.5rem; color: var(--text-muted); font-size: 0.85rem; border: 1px dashed var(--border); border-radius: 0.5rem;">No monitored YouTube channels added. Click <strong>+ Add Channel</strong> to configure automatic live stream detection and auto-join.</div>`;
+        }} else {{
+          mcContainer.innerHTML = chanArr.map(c => `
+            <div class="item-card" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem;">
+              <div style="display: flex; align-items: center; gap: 0.75rem;">
+                ${{c.thumbnail_url ? `<img src="${{c.thumbnail_url}}" style="width: 2.25rem; height: 2.25rem; border-radius: 50%; object-fit: cover; border: 1px solid var(--border);" />` : `<div style="width: 2.25rem; height: 2.25rem; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-size: 1rem; border: 1px solid var(--border);">📺</div>`}}
+                <div>
+                  <div style="font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 0.5rem;">
+                    <a href="https://www.youtube.com/channel/${{c.youtube_channel_id}}" target="_blank" style="color: inherit; text-decoration: none;">${{c.channel_name || "Unknown Channel"}}</a>
+                    ${{c.channel_handle ? `<span style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">${{c.channel_handle}}</span>` : ""}}
+                    <span class="badge badge-ok" style="font-size: 0.65rem;">${{c.verification_status || "VERIFIED"}}</span>
+                    ${{c.last_seen_live_at ? `<span class="badge badge-danger" style="font-size: 0.65rem;">🔴 LIVE</span>` : `<span class="badge" style="font-size: 0.65rem; color: var(--text-muted);">OFFLINE</span>`}}
+                  </div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace; margin-top: 0.2rem;">
+                    ID: ${{c.youtube_channel_id}} • Creator: ${{c.creator_name || "N/A"}} • Last checked: ${{c.last_checked_at ? new Date(c.last_checked_at).toLocaleTimeString() : "Never"}}
+                    ${{c.last_error_code ? `<span style="color: var(--rose); margin-left: 0.5rem;">[${{c.last_error_code}}]</span>` : ""}}
+                  </div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 0.4rem; align-items: center;">
+                <button class="btn btn-secondary" onclick="toggleAutoJoin('${{c.id}}', ${{c.auto_join_enabled}})" style="font-size: 0.7rem; color: ${{c.auto_join_enabled ? '#34d399' : 'var(--text-muted)'}};">
+                  ${{c.auto_join_enabled ? '⚡ Auto-Join: ON' : '⏸ Auto-Join: OFF'}}
+                </button>
+                <button class="btn btn-secondary" onclick="checkChannelNow('${{c.id}}')" style="font-size: 0.7rem;">
+                  🔍 Check Live
+                </button>
+                <button class="btn btn-secondary" onclick="deleteMonitoredChannel('${{c.id}}')" style="font-size: 0.7rem; color: var(--rose);">
+                  🗑 Delete
+                </button>
+              </div>
+            </div>
+          `).join("");
+        }}
       }}
 
       // Quota & Keys

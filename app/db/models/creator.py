@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.db.models.creator_ai_settings import CreatorAISettings
     from app.db.models.moderation_feedback import ModerationFeedback
     from app.db.models.moderation_review import ModerationReview
+    from app.db.models.monitored_channel import MonitoredChannel
     from app.db.models.stream_session import StreamSession
     from app.db.models.viewer_trust import ViewerTrustProfile
     from app.db.models.websub_subscription import WebSubSubscription
@@ -83,6 +84,11 @@ class Creator(Base, TimestampMixin):
         back_populates="creator",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    monitored_channels: Mapped[list["MonitoredChannel"]] = relationship(
+        "MonitoredChannel",
+        back_populates="creator",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

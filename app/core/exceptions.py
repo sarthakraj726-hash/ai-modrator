@@ -184,8 +184,85 @@ class StreamSessionAlreadyActiveError(StreamSessionError):
 class InvalidArgumentError(AppException):
     """Raised when client input or parameter format is invalid."""
 
-    def __init__(self, message: str = "Invalid argument provided"):
-        super().__init__(message=message, status_code=400)
+    def __init__(self, message: str = "Invalid argument provided", details: dict[str, Any] | None = None):
+        super().__init__(message=message, status_code=400, details=details)
+
+
+class StreamNotLiveError(StreamSessionError):
+    """Raised when a specified stream is not broadcasting live."""
+
+    def __init__(self, video_id: str):
+        super().__init__(
+            message=f"YouTube video '{video_id}' is not currently an active live stream",
+            status_code=400,
+            details={"error_code": "STREAM_NOT_LIVE", "video_id": video_id},
+        )
+
+
+class VideoNotFoundError(StreamSessionError):
+    """Raised when YouTube video cannot be found."""
+
+    def __init__(self, video_id: str):
+        super().__init__(
+            message=f"YouTube video '{video_id}' was not found. Please verify the URL or Video ID.",
+            status_code=404,
+            details={"error_code": "VIDEO_NOT_FOUND", "video_id": video_id},
+        )
+
+
+class LiveChatUnavailableError(StreamSessionError):
+    """Raised when live broadcast does not have an accessible live chat."""
+
+    def __init__(self, video_id: str):
+        super().__init__(
+            message=f"No active live chat found for stream '{video_id}'. Ensure chat is enabled on the broadcast.",
+            status_code=400,
+            details={"error_code": "LIVE_CHAT_UNAVAILABLE", "video_id": video_id},
+        )
+
+
+class DuplicateStreamConnectionError(StreamSessionError):
+    """Raised when stream is already actively connected or being processed."""
+
+    def __init__(self, video_id: str):
+        super().__init__(
+            message=f"Stream '{video_id}' is already actively connected or being processed",
+            status_code=409,
+            details={"error_code": "DUPLICATE_CONNECTION", "video_id": video_id},
+        )
+
+
+class ChannelNotFoundError(AppException):
+    """Raised when YouTube channel cannot be resolved or found."""
+
+    def __init__(self, identifier: str):
+        super().__init__(
+            message=f"YouTube channel '{identifier}' was not found. Please verify the Channel ID or Handle.",
+            status_code=404,
+            details={"error_code": "CHANNEL_NOT_FOUND", "identifier": identifier},
+        )
+
+
+class ChannelAlreadyMonitoredError(AppException):
+    """Raised when a creator attempts to monitor a channel already in their list."""
+
+    def __init__(self, channel_id: str):
+        super().__init__(
+            message=f"YouTube channel '{channel_id}' is already being monitored for this creator",
+            status_code=409,
+            details={"error_code": "CHANNEL_ALREADY_MONITORED", "channel_id": channel_id},
+        )
+
+
+class WorkerStartupError(StreamSessionError):
+    """Raised when worker process/thread initialization fails."""
+
+    def __init__(self, session_id: str, reason: str = "Worker startup failed"):
+        super().__init__(
+            message=f"Failed to launch worker for stream session '{session_id}': {reason}",
+            status_code=502,
+            details={"error_code": "WORKER_STARTUP_FAILED", "session_id": session_id, "reason": reason},
+        )
 
 
 class ExternalServiceError(AppException):

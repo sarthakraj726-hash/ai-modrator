@@ -15,6 +15,7 @@ from app.db.models.metric_snapshot import SystemMetricSnapshot
 from app.db.models.mini_game import MiniGameSession
 from app.db.models.moderation_feedback import ModerationFeedback
 from app.db.models.moderation_review import ModerationReview
+from app.db.models.monitored_channel import MonitoredChannel
 from app.db.models.store import StoreItem, ViewerInventory
 from app.db.models.stream_session import StreamSession, StreamStatus
 from app.db.models.system_event import SystemEvent, SystemSeverity
@@ -35,6 +36,7 @@ __all__ = [
     "YouTubeChatCheckpoint",
     "ModerationReview",
     "ModerationFeedback",
+    "MonitoredChannel",
     "ViewerTrustProfile",
     "AIUsageRecord",
     "CreatorAISettings",

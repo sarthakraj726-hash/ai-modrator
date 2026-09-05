@@ -20,6 +20,7 @@ os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 os.environ["ADMIN_SECRET"] = "test-admin-secret-12345"
 
 import app.cache.redis as redis_module
+import app.youtube.broadcast_resolver as broadcast_resolver_module
 from app.cache.redis import InMemoryRedisFallback
 from app.db.base import Base
 from app.db.session import get_db_session
@@ -47,16 +48,21 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
     await engine.dispose()
 
 
-@pytest_asyncio.fixture(scope="function")
-async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
-    """Provide an isolated database session rolled back after test."""
-    session_factory = async_sessionmaker(
+@pytest.fixture(scope="function")
+def session_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Provide an async session factory bound to the test engine."""
+    return async_sessionmaker(
         bind=test_engine,
         class_=AsyncSession,
         expire_on_commit=False,
         autoflush=False,
         autocommit=False,
     )
+
+
+@pytest_asyncio.fixture(scope="function")
+async def db_session(session_factory: async_sessionmaker[AsyncSession]) -> AsyncGenerator[AsyncSession, None]:
+    """Provide an isolated database session rolled back after test."""
     async with session_factory() as session:
         yield session
         await session.rollback()
@@ -66,6 +72,7 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
 async def reset_singletons():
     """Reset singletons, in-memory caches, and worker states between tests."""
     redis_module._redis_instance = InMemoryRedisFallback()
+    broadcast_resolver_module._global_broadcast_resolver = None
 
     event_bus = get_event_bus()
     event_bus.clear()
@@ -82,6 +89,7 @@ async def reset_singletons():
     await worker_manager.stop_all()
     worker_manager.clear()
     event_bus.clear()
+    broadcast_resolver_module._global_broadcast_resolver = None
 
 
 @pytest_asyncio.fixture(scope="function")

@@ -1,5 +1,7 @@
 """Integration tests for YouTube endpoints and URL-based stream connection."""
 
+from unittest.mock import patch
+
 import pytest
 from httpx import AsyncClient
 
@@ -50,21 +52,20 @@ async def test_connect_stream_by_url(client: AsyncClient, admin_headers: dict[st
             is_live=True,
         )
 
-    resolver.resolve_broadcast = mock_resolve_broadcast
+    with patch.object(resolver, "resolve_broadcast", side_effect=mock_resolve_broadcast):
+        # 1. Connect via URL
+        payload = {"youtube_live_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
+        resp = await client.post("/streams/connect", json=payload, headers=admin_headers)
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["youtube_video_id"] == "dQw4w9WgXcQ"
+        session_id = data["id"]
 
-    # 1. Connect via URL
-    payload = {"youtube_live_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
-    resp = await client.post("/streams/connect", json=payload, headers=admin_headers)
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["youtube_video_id"] == "dQw4w9WgXcQ"
-    session_id = data["id"]
+        # 2. Duplicate connect attempt should fail (409 Conflict)
+        resp_dup = await client.post("/streams/connect", json=payload, headers=admin_headers)
+        assert resp_dup.status_code in (400, 409)
 
-    # 2. Duplicate connect attempt should fail (409 Conflict)
-    resp_dup = await client.post("/streams/connect", json=payload, headers=admin_headers)
-    assert resp_dup.status_code in (400, 409)
-
-    # 3. Disconnect
-    resp_disc = await client.post(f"/streams/{session_id}/disconnect", headers=admin_headers)
-    assert resp_disc.status_code == 200
-    assert resp_disc.json()["status"] == "ENDED"
+        # 3. Disconnect
+        resp_disc = await client.post(f"/streams/{session_id}/disconnect", headers=admin_headers)
+        assert resp_disc.status_code == 200
+        assert resp_disc.json()["status"] == "ENDED"
