@@ -141,6 +141,16 @@ class ApiKeyPool:
             now = time.time()
             meta.last_failure = now
 
+            # Ignore project mismatch error caused by mixed API key + OAuth token
+            if (
+                "different projects" in error_message
+                or "API Key and the authentication credential" in error_message
+            ):
+                logger.warning(
+                    f"API key slot {meta.slot} ({meta.masked_key}) received project mismatch warning. Key remains {meta.status.value}."
+                )
+                return
+
             if status_code == 401:
                 # Do not invalidate API keys if error is due to endpoint requiring OAuth principal
                 if (

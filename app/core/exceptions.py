@@ -202,12 +202,16 @@ class StreamNotLiveError(StreamSessionError):
 class VideoNotFoundError(StreamSessionError):
     """Raised when YouTube video cannot be found."""
 
-    def __init__(self, video_id: str):
+    def __init__(self, video_id: str, details: dict[str, Any] | None = None):
+        merged = {"error_code": "VIDEO_NOT_FOUND", "video_id": video_id}
+        if details:
+            merged.update(details)
         super().__init__(
-            message=f"YouTube video '{video_id}' was not found. Please verify the URL or Video ID.",
+            message=f"YouTube video '{video_id}' was not found. Please verify the URL or Video ID, and ensure the stream visibility is Public or Unlisted in YouTube Studio.",
             status_code=404,
-            details={"error_code": "VIDEO_NOT_FOUND", "video_id": video_id},
+            details=merged,
         )
+
 
 
 class LiveChatUnavailableError(StreamSessionError):

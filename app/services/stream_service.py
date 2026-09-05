@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cache.redis import get_redis_client
 from app.core.config import get_settings
 from app.core.exceptions import (
+    AppException,
     DuplicateStreamConnectionError,
     EntityNotFoundError,
     InvalidArgumentError,
@@ -129,7 +130,20 @@ class StreamService:
             try:
                 broadcast = await self.broadcast_resolver.resolve_broadcast(video_id)
             except EntityNotFoundError as err:
-                raise VideoNotFoundError(video_id) from err
+                raise VideoNotFoundError(
+                    video_id=video_id,
+                    details={
+                        "error_code": "VIDEO_NOT_FOUND",
+                        "video_id": video_id,
+                        "hint": (
+                            "YouTube Data API could not find this video. "
+                            "Please ensure: (1) The stream visibility is Public or Unlisted in YouTube Studio "
+                            "(Private streams cannot be accessed by API keys). "
+                            "(2) The live stream is actively broadcasting in OBS / YouTube Studio. "
+                            "(3) The Video ID or live URL is accurate."
+                        ),
+                    },
+                ) from err
             except (
                 VideoNotFoundError,
                 StreamNotLiveError,
@@ -139,7 +153,8 @@ class StreamService:
                 raise
             except Exception as e:
                 if not settings.is_testing:
-                    raise VideoNotFoundError(video_id) from e
+                    logger.error(f"Unexpected error resolving broadcast '{video_id}': {e}", exc_info=True)
+                    raise
                 broadcast = ResolvedBroadcast(
                     video_id=video_id,
                     channel_id="UC1234567890123456789012",

@@ -65,34 +65,54 @@ class YouTubeClient:
         reservation_id = await self.quota_manager.reserve(units=cost, method=method_name)
 
         try:
-            # 2. Key pool selection
-            api_key = await self.key_pool.get_available_key()
-            params_with_key = {**params, "key": api_key}
-            url = f"{YOUTUBE_API_BASE_URL}/{endpoint}"
-
             from app.core.config import get_settings
 
             app_settings = get_settings()
             http_timeout = 0.5 if app_settings.is_testing else 10.0
             retry_delay = 0.01 if app_settings.is_testing else 0.5
+            url = f"{YOUTUBE_API_BASE_URL}/{endpoint}"
 
+            is_oauth_write = (
+                method_name.startswith("liveChatMessages.insert")
+                or method_name.startswith("liveChatMessages.delete")
+                or http_method in ("POST", "DELETE", "PUT", "PATCH")
+            )
+
+            api_key: str | None = None
+            params_for_req: dict[str, Any] = dict(params)
             headers: dict[str, str] = {}
-            token = await self.oauth_manager.get_access_token()
-            if token:
+
+            if is_oauth_write:
+                token = await self.oauth_manager.get_access_token()
+                if not token:
+                    raise YouTubeAPIError(
+                        message="YouTube live chat write action requires OAuth 2.0 authorization for the bot channel. "
+                        "API keys cannot post or delete chat messages. Please configure YOUTUBE_OAUTH_TOKEN in Railway or via the Control Center.",
+                        status_code=401,
+                        reason="oauth_token_required",
+                    )
                 headers["Authorization"] = f"Bearer {token}"
+                # CRITICAL: Do NOT send 'key' query param when using OAuth Bearer token!
+                # Google API rejects requests with HTTP 400 'The API Key and the authentication credential are from different projects'
+                # if the API key project and OAuth client project do not match.
+            else:
+                api_key = await self.key_pool.get_available_key()
+                params_for_req["key"] = api_key
+                # CRITICAL: Do NOT send foreign OAuth token on read endpoints using API keys!
 
             async def _do_http() -> dict[str, Any]:
                 async with httpx.AsyncClient(timeout=http_timeout) as http_client:
                     if http_method == "GET":
-                        response = await http_client.get(url, params=params_with_key, headers=headers)
+                        response = await http_client.get(url, params=params_for_req, headers=headers)
                     else:
                         response = await http_client.request(
-                            http_method, url, params=params_with_key, json=json_data, headers=headers
+                            http_method, url, params=params_for_req, json=json_data, headers=headers
                         )
 
                     if response.status_code == 204:
-                        await self.key_pool.record_success(api_key)
-                        await self.key_pool.record_usage(api_key, cost)
+                        if api_key:
+                            await self.key_pool.record_success(api_key)
+                            await self.key_pool.record_usage(api_key, cost)
                         return {}
 
                     if response.status_code != 200:
@@ -116,9 +136,12 @@ class YouTubeClient:
                                 or "CREDENTIALS_MISSING" in error_msg
                                 or "Login Required" in error_msg
                             )
+                        ) or (
+                            "different projects" in error_msg
+                            or "API Key and the authentication credential" in error_msg
                         )
 
-                        if not is_oauth_error:
+                        if api_key and not is_oauth_error:
                             await self.key_pool.record_error(
                                 key=api_key,
                                 status_code=response.status_code,
