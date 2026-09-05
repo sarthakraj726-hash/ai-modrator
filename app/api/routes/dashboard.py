@@ -61,6 +61,16 @@ class ManualConnectRequest(BaseModel):
     creator_id: str | None = None
 
 
+class BotAuthUpdateRequest(BaseModel):
+    token: str = Field(..., description="OAuth 2.0 access token or refresh token")
+    is_refresh_token: bool = Field(False, description="True if provided token is a refresh token")
+
+
+class StreamTestMessageRequest(BaseModel):
+    live_chat_id: str = Field(..., description="Active YouTube Live Chat ID")
+    message: str = Field(..., description="Message text to post")
+
+
 class MonitoredChannelCreateRequest(BaseModel):
     identifier: str
     display_label: str | None = None
@@ -401,7 +411,97 @@ async def manual_connect_stream(
         ) from e
 
 
-# --- 2b. Monitored YouTube Channels Registry & Auto-Join ---
+# --- 2b. YouTube Bot OAuth Authorization & Live Chat Testing ---
+@router.get("/bot-auth", summary="Get YouTube Bot OAuth Authorization Status")
+async def get_bot_auth_status(admin: AdminUserDep) -> dict[str, Any]:
+    from app.core.config import get_settings
+    from app.youtube.oauth import get_oauth_manager
+
+    oauth_mgr = get_oauth_manager()
+    settings = get_settings()
+
+    token = await oauth_mgr.get_access_token()
+    is_auth = bool(token and token != "mock_testing_oauth_token")
+
+    has_refresh = bool(
+        getattr(settings, "YOUTUBE_REFRESH_TOKEN", None)
+        or await oauth_mgr.redis_client.get("youtube:bot:oauth_refresh_token")
+    )
+    has_static = bool(settings.YOUTUBE_OAUTH_TOKEN)
+
+    token_preview = None
+    if token and len(token) > 10:
+        token_preview = f"{token[:6]}...{token[-4:]}"
+
+    return {
+        "is_authenticated": is_auth,
+        "token_preview": token_preview,
+        "has_refresh_token": has_refresh,
+        "has_env_token": has_static,
+        "auth_source": "refresh_token" if has_refresh else ("env_token" if has_static else ("redis_token" if is_auth else "none")),
+        "message": (
+            "Bot account is authorized to post live chat messages."
+            if is_auth
+            else "No YouTube OAuth token configured. Live chat posting requires OAuth 2.0 credentials for the bot."
+        ),
+    }
+
+
+@router.post("/bot-auth", summary="Save YouTube Bot OAuth Token")
+async def update_bot_auth(req: BotAuthUpdateRequest, admin: AdminUserDep) -> dict[str, Any]:
+    from app.youtube.oauth import get_oauth_manager
+
+    oauth_mgr = get_oauth_manager()
+    await oauth_mgr.save_bot_token(req.token, is_refresh_token=req.is_refresh_token)
+    return {
+        "status": "SAVED",
+        "is_refresh_token": req.is_refresh_token,
+        "message": "YouTube bot authorization token saved successfully.",
+    }
+
+
+@router.delete("/bot-auth", summary="Clear YouTube Bot OAuth Token")
+async def clear_bot_auth(admin: AdminUserDep) -> dict[str, Any]:
+    from app.youtube.oauth import get_oauth_manager
+
+    oauth_mgr = get_oauth_manager()
+    await oauth_mgr.clear_bot_token()
+    return {
+        "status": "CLEARED",
+        "message": "YouTube bot authorization token cleared.",
+    }
+
+
+@router.post("/streams/test-message", summary="Send Test Message to YouTube Live Chat")
+async def send_test_message(req: StreamTestMessageRequest, admin: AdminUserDep) -> dict[str, Any]:
+    from app.core.exceptions import YouTubeAPIError as CoreYouTubeAPIError
+    from app.youtube.client import get_youtube_client
+    from app.youtube.models import YouTubeAPIError as ModelsYouTubeAPIError
+
+    client = get_youtube_client()
+    try:
+        res = await client.insert_live_chat_message(
+            live_chat_id=req.live_chat_id,
+            message_text=req.message,
+        )
+        return {
+            "status": "SENT",
+            "live_chat_id": req.live_chat_id,
+            "response": res,
+        }
+    except (CoreYouTubeAPIError, ModelsYouTubeAPIError) as yt_err:
+        raise HTTPException(
+            status_code=getattr(yt_err, "status_code", 400) or 400,
+            detail=f"YouTube API Error: {getattr(yt_err, 'message', str(yt_err))}",
+        ) from yt_err
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to post test chat message: {exc}",
+        ) from exc
+
+
+# --- 2c. Monitored YouTube Channels Registry & Auto-Join ---
 @router.get("/monitored-channels", summary="List Monitored YouTube Channels")
 async def list_monitored_channels(
     db: DBSessionDep,
@@ -1143,7 +1243,19 @@ alias_router.add_api_route(
 alias_router.add_api_route(
     "/moderation", get_moderation_queue, methods=["GET"], summary="Moderation Queue Alias"
 )
-alias_router.add_api_route("/incidents", list_incidents, methods=["GET"], summary="Incidents Alias")
 alias_router.add_api_route(
     "/events/stream", stream_dashboard_events, methods=["GET"], summary="SSE Stream Alias"
 )
+alias_router.add_api_route(
+    "/bot-auth", get_bot_auth_status, methods=["GET"], summary="Bot Auth Status Alias"
+)
+alias_router.add_api_route(
+    "/bot-auth", update_bot_auth, methods=["POST"], summary="Bot Auth Update Alias"
+)
+alias_router.add_api_route(
+    "/bot-auth", clear_bot_auth, methods=["DELETE"], summary="Bot Auth Clear Alias"
+)
+alias_router.add_api_route(
+    "/streams/test-message", send_test_message, methods=["POST"], summary="Test Live Chat Message Alias"
+)
+

@@ -90,3 +90,47 @@ async def test_dashboard_full_flow(api_client: AsyncClient, db_session: AsyncSes
     res = await api_client.get("/api/v1/streams", headers=headers)
     assert res.status_code == 200
     assert isinstance(res.json(), list)
+
+    # 12. Bot Auth Status
+    res = await api_client.get("/api/v1/dashboard/bot-auth", headers=headers)
+    assert res.status_code == 200
+    assert "is_authenticated" in res.json()
+
+    # 13. Save Bot Token
+    res = await api_client.post(
+        "/api/v1/dashboard/bot-auth",
+        headers=headers,
+        json={"token": "ya29.test_access_token_12345", "is_refresh_token": False},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "SAVED"
+
+    # 14. Verify Bot Auth Status Updated
+    res = await api_client.get("/api/v1/dashboard/bot-auth", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["is_authenticated"] is True
+    assert "ya29." in res.json()["token_preview"]
+
+    # 15. Clear Bot Token
+    res = await api_client.delete("/api/v1/dashboard/bot-auth", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["status"] == "CLEARED"
+
+    # 16. Test Message Endpoint (with mocked YouTube Client insert)
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.youtube.client.YouTubeClient.insert_live_chat_message",
+        new_callable=AsyncMock,
+        return_value={"id": "mock_msg_123"},
+    ):
+        res = await api_client.post(
+            "/api/v1/dashboard/streams/test-message",
+            headers=headers,
+            json={"live_chat_id": "test_chat_id_123", "message": "Test live message"},
+        )
+        assert res.status_code == 200
+        assert res.json()["status"] == "SENT"
+        assert res.json()["response"]["id"] == "mock_msg_123"
+
+

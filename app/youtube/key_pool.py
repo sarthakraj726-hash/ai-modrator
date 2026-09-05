@@ -142,6 +142,18 @@ class ApiKeyPool:
             meta.last_failure = now
 
             if status_code == 401:
+                # Do not invalidate API keys if error is due to endpoint requiring OAuth principal
+                if (
+                    "API keys are not supported" in error_message
+                    or "CREDENTIALS_MISSING" in error_message
+                    or "Login Required" in error_message
+                    or "OAuth" in error_message
+                ):
+                    logger.warning(
+                        f"API key slot {meta.slot} ({meta.masked_key}) received 401 on OAuth-required endpoint. Key remains {meta.status.value}."
+                    )
+                    return
+
                 meta.failures_401 += 1
                 meta.status = KeyStatus.INVALID
                 logger.error(

@@ -16,6 +16,7 @@ from app.youtube.models import (
     YouTubeChatPage,
     YouTubeStreamInfo,
 )
+from app.youtube.oauth import YouTubeOAuthManager, get_oauth_manager
 from app.youtube.quota import QuotaManager, get_quota_manager
 from app.youtube.quota_registry import quota_cost_registry
 
@@ -26,7 +27,7 @@ YOUTUBE_API_BASE_URL = "https://www.googleapis.com/youtube/v3"
 
 class YouTubeClient:
     """
-    YouTube API client strictly routed through QuotaManager and ApiKeyPool.
+    YouTube API client strictly routed through QuotaManager, ApiKeyPool, and OAuthManager.
     Includes circuit breaker protection, per-method quota cost calculation, and retry backoff.
     """
 
@@ -35,6 +36,7 @@ class YouTubeClient:
         quota_manager: QuotaManager | None = None,
         key_pool: ApiKeyPool | None = None,
         circuit_breaker: CircuitBreaker | None = None,
+        oauth_manager: YouTubeOAuthManager | None = None,
     ) -> None:
         self.quota_manager = quota_manager or get_quota_manager()
         self.key_pool = key_pool or get_key_pool()
@@ -43,6 +45,7 @@ class YouTubeClient:
             failure_threshold=5,
             recovery_timeout_seconds=30.0,
         )
+        self.oauth_manager = oauth_manager or get_oauth_manager()
 
     async def _request(
         self,
@@ -74,8 +77,9 @@ class YouTubeClient:
             retry_delay = 0.01 if app_settings.is_testing else 0.5
 
             headers: dict[str, str] = {}
-            if getattr(app_settings, "YOUTUBE_OAUTH_TOKEN", None):
-                headers["Authorization"] = f"Bearer {app_settings.YOUTUBE_OAUTH_TOKEN}"
+            token = await self.oauth_manager.get_access_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
 
             async def _do_http() -> dict[str, Any]:
                 async with httpx.AsyncClient(timeout=http_timeout) as http_client:
@@ -104,11 +108,22 @@ class YouTubeClient:
                         except Exception:
                             pass
 
-                        await self.key_pool.record_error(
-                            key=api_key,
-                            status_code=response.status_code,
-                            error_message=f"{reason}: {error_msg}",
+                        is_oauth_error = (
+                            response.status_code == 401
+                            and (
+                                "API keys are not supported" in error_msg
+                                or "OAuth" in error_msg
+                                or "CREDENTIALS_MISSING" in error_msg
+                                or "Login Required" in error_msg
+                            )
                         )
+
+                        if not is_oauth_error:
+                            await self.key_pool.record_error(
+                                key=api_key,
+                                status_code=response.status_code,
+                                error_message=f"{reason}: {error_msg}",
+                            )
 
                         # Classify failure
                         classification = RequestClassification.HTTP_500
@@ -289,6 +304,21 @@ class YouTubeClient:
         if not live_chat_id or not message_text or not message_text.strip():
             logger.warning("Attempted to insert live chat message with empty chat ID or message text.")
             return {}
+
+        token = await self.oauth_manager.get_access_token()
+        if not token:
+            logger.warning(
+                f"Cannot post message to live chat '{live_chat_id}': No YouTube OAuth token configured! "
+                "YouTube Data API v3 strictly requires an OAuth 2.0 Bearer token for bot accounts to post chat messages. "
+                "API keys are read-only. Please configure YOUTUBE_OAUTH_TOKEN on Railway or via the Control Center."
+            )
+            raise YouTubeAPIError(
+                message="YouTube live chat posting requires OAuth 2.0 authorization for the bot channel. "
+                "API keys cannot post messages (Google requires an authenticated channel principal). "
+                "Please configure YOUTUBE_OAUTH_TOKEN in Railway or via the Control Center.",
+                status_code=401,
+                reason="oauth_token_required",
+            )
 
         payload = {
             "snippet": {

@@ -396,6 +396,54 @@ def render_control_center_html(environment: str, version: str) -> str:
       </div>
     </div>
 
+    <!-- Section: YouTube Bot Account (OAuth Authorization for Chat Posting) -->
+    <div class="panel" style="margin-bottom: 1.5rem;">
+      <div class="panel-header">
+        <div class="panel-title"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--cyan);"></span> 🤖 YouTube Bot Account (OAuth Authorization)</div>
+        <span id="bot-auth-badge" class="badge">CHECKING AUTH...</span>
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem; line-height: 1.6;">
+        <strong style="color: #f8fafc;">Why OAuth 2.0 is required:</strong> Google's YouTube Data API v3 strictly prohibits API keys from posting live chat messages (<code style="color: var(--cyan);">liveChatMessages.insert</code>). API keys are read-only. To send the stream join greeting, AI co-host replies, and moderation warnings, the bot channel requires an OAuth token.
+      </div>
+
+      <div class="grid-2" style="gap: 1.25rem;">
+        <!-- Left Column: Bot Token Management -->
+        <div style="background: var(--surface); padding: 1rem; border-radius: 0.5rem; border: 1px solid var(--border);">
+          <div style="font-weight: 700; font-size: 0.85rem; margin-bottom: 0.5rem; color: #f1f5f9;">Set Bot OAuth Token</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            Paste an OAuth Access Token (<code style="color: var(--cyan);">ya29...</code>) or Refresh Token. You can generate one in 1 minute using the
+            <a href="https://developers.google.com/oauthplayground" target="_blank" style="color: var(--purple); text-decoration: underline;">Google OAuth 2.0 Playground</a> (Scope: <code style="color: #34d399;">https://www.googleapis.com/auth/youtube.force-ssl</code>).
+          </div>
+          <div id="bot-auth-status-msg" style="font-size: 0.75rem; font-family: monospace; margin-bottom: 0.75rem; padding: 0.5rem; border-radius: 0.375rem; background: var(--surface-raised); border: 1px solid var(--border);">
+            Status: Loading...
+          </div>
+          <input type="password" id="input-bot-token" class="input-field" placeholder="Paste ya29... access token or refresh token here" style="margin-bottom: 0.5rem;" />
+          <div style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+            <input type="checkbox" id="check-is-refresh-token" style="accent-color: #06b6d4;" />
+            <label for="check-is-refresh-token" style="font-size: 0.75rem; cursor: pointer;">This is a Google Refresh Token (auto-renews indefinitely)</label>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-primary" onclick="submitBotToken()" id="btn-save-bot-token" style="flex: 1;">Save Bot Token</button>
+            <button class="btn btn-secondary" onclick="clearBotToken()" style="color: var(--rose);">Clear</button>
+          </div>
+        </div>
+
+        <!-- Right Column: Live Chat Test Sender -->
+        <div style="background: var(--surface); padding: 1rem; border-radius: 0.5rem; border: 1px solid var(--border);">
+          <div style="font-weight: 700; font-size: 0.85rem; margin-bottom: 0.5rem; color: #f1f5f9;">Test Live Chat Posting</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            Send an instant test message to verify YouTube live chat write permissions.
+          </div>
+          <label style="font-size: 0.75rem; font-family: monospace;">Active Live Chat ID:</label>
+          <input type="text" id="input-test-chat-id" class="input-field" placeholder="e.g. Cg0KC2..." style="margin-bottom: 0.5rem;" />
+          <label style="font-size: 0.75rem; font-family: monospace;">Message Text:</label>
+          <input type="text" id="input-test-chat-msg" class="input-field" value="✨ Testing Goddess AI live chat connection! ✨" style="margin-bottom: 0.75rem;" />
+          <div id="test-msg-result" style="display: none; font-size: 0.75rem; margin-bottom: 0.75rem; padding: 0.5rem; border-radius: 0.375rem; word-break: break-all;"></div>
+          <button class="btn btn-secondary" onclick="submitTestMessage()" id="btn-send-test-msg" style="width: 100%; border-color: var(--cyan); color: var(--cyan);">💬 Send Test Chat Message</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Section: Monitored YouTube Channels & Auto-Join -->
     <div class="panel" style="margin-bottom: 1.5rem;">
       <div class="panel-header">
@@ -728,6 +776,127 @@ def render_control_center_html(environment: str, version: str) -> str:
       }}
     }}
 
+    async function fetchBotAuth() {{
+      const bBadge = document.getElementById("bot-auth-badge");
+      const sMsg = document.getElementById("bot-auth-status-msg");
+      try {{
+        const res = await fetch("/api/v1/dashboard/bot-auth", {{ headers: getHeaders() }});
+        if (res.ok) {{
+          const data = await res.json();
+          if (data.is_authenticated) {{
+            if (bBadge) {{
+              bBadge.className = "badge badge-ok";
+              bBadge.textContent = "AUTHENTICATED (" + (data.token_preview || "OAUTH") + ")";
+            }}
+            if (sMsg) {{
+              sMsg.style.borderColor = "rgba(16, 185, 129, 0.4)";
+              sMsg.style.color = "#34d399";
+              sMsg.textContent = "✓ Authorized (" + data.auth_source + "). Chat write capabilities are ONLINE.";
+            }}
+          }} else {{
+            if (bBadge) {{
+              bBadge.className = "badge badge-warn";
+              bBadge.textContent = "MISSING OAUTH TOKEN";
+            }}
+            if (sMsg) {{
+              sMsg.style.borderColor = "rgba(245, 158, 11, 0.4)";
+              sMsg.style.color = "#fbbf24";
+              sMsg.textContent = "⚠ No token active. Live chat posting is disabled until configured.";
+            }}
+          }}
+        }}
+      }} catch (_) {{}}
+    }}
+
+    async function submitBotToken() {{
+      const tok = document.getElementById("input-bot-token").value.trim();
+      const isRef = document.getElementById("check-is-refresh-token").checked;
+      const btn = document.getElementById("btn-save-bot-token");
+      if (!tok) {{ alert("Please paste an OAuth token."); return; }}
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+      try {{
+        const res = await fetch("/api/v1/dashboard/bot-auth", {{
+          method: "POST",
+          headers: Object.assign({{ "Content-Type": "application/json" }}, getHeaders()),
+          body: JSON.stringify({{ token: tok, is_refresh_token: isRef }})
+        }});
+        if (res.ok) {{
+          alert("Bot OAuth token saved successfully!");
+          document.getElementById("input-bot-token").value = "";
+          fetchBotAuth();
+          refreshDashboard();
+        }} else {{
+          const err = await res.json();
+          alert("Failed to save token: " + (err.detail || JSON.stringify(err)));
+        }}
+      }} catch (e) {{
+        alert("Error saving token: " + e.message);
+      }} finally {{
+        btn.disabled = false;
+        btn.textContent = "Save Bot Token";
+      }}
+    }}
+
+    async function clearBotToken() {{
+      if (!confirm("Are you sure you want to clear the bot OAuth token?")) return;
+      try {{
+        const res = await fetch("/api/v1/dashboard/bot-auth", {{
+          method: "DELETE",
+          headers: getHeaders()
+        }});
+        if (res.ok) {{
+          alert("Bot token cleared.");
+          fetchBotAuth();
+          refreshDashboard();
+        }}
+      }} catch (e) {{
+        alert("Error clearing token: " + e.message);
+      }}
+    }}
+
+    async function submitTestMessage() {{
+      const chatId = document.getElementById("input-test-chat-id").value.trim();
+      const msg = document.getElementById("input-test-chat-msg").value.trim();
+      const resBox = document.getElementById("test-msg-result");
+      const btn = document.getElementById("btn-send-test-msg");
+      if (!chatId || !msg) {{
+        alert("Please enter both Live Chat ID and message text.");
+        return;
+      }}
+      btn.disabled = true;
+      btn.textContent = "Posting message...";
+      resBox.style.display = "none";
+      try {{
+        const res = await fetch("/api/v1/dashboard/streams/test-message", {{
+          method: "POST",
+          headers: Object.assign({{ "Content-Type": "application/json" }}, getHeaders()),
+          body: JSON.stringify({{ live_chat_id: chatId, message: msg }})
+        }});
+        const data = await res.json();
+        resBox.style.display = "block";
+        if (res.ok) {{
+          resBox.className = "banner";
+          resBox.style.background = "rgba(16, 185, 129, 0.15)";
+          resBox.style.color = "#34d399";
+          resBox.style.border = "1px solid rgba(16, 185, 129, 0.4)";
+          resBox.textContent = "✓ Message posted successfully! Message ID: " + (data.response?.id || "OK");
+        }} else {{
+          resBox.className = "banner";
+          resBox.style.background = "rgba(244, 63, 94, 0.15)";
+          resBox.style.color = "#fb7185";
+          resBox.style.border = "1px solid rgba(244, 63, 94, 0.4)";
+          resBox.textContent = "✗ Error: " + (data.detail || JSON.stringify(data));
+        }}
+      }} catch (e) {{
+        resBox.style.display = "block";
+        resBox.textContent = "Network error: " + e.message;
+      }} finally {{
+        btn.disabled = false;
+        btn.textContent = "💬 Send Test Chat Message";
+      }}
+    }}
+
     async function refreshDashboard() {{
       const headers = getHeaders();
       let hasAuthIssue = false;
@@ -935,6 +1104,14 @@ def render_control_center_html(environment: str, version: str) -> str:
         `).join("");
       }}
 
+      // Auto-fill test live chat ID if empty
+      const testChatInput = document.getElementById("input-test-chat-id");
+      if (testChatInput && !testChatInput.value && streamsArr.length > 0) {{
+        const activeChatId = streamsArr[0].live_chat_id || streamsArr[0].youtube_live_chat_id;
+        if (activeChatId) testChatInput.value = activeChatId;
+      }}
+
+      fetchBotAuth();
       document.getElementById("last-updated").textContent = `Updated: ${{new Date().toLocaleTimeString()}}`;
     }}
 

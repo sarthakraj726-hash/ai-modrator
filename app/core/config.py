@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY_2: str = ""
     YOUTUBE_API_KEY_3: str = ""
     YOUTUBE_OAUTH_TOKEN: str = ""
+    YOUTUBE_REFRESH_TOKEN: str = ""
+    YOUTUBE_CLIENT_ID: str = ""
+    YOUTUBE_CLIENT_SECRET: str = ""
 
     # YouTube Daily Quota Hard Budget (Units per Day)
     YOUTUBE_QUOTA_DAILY_LIMIT: int = Field(
