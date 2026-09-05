@@ -73,14 +73,23 @@ class YouTubeClient:
             http_timeout = 0.5 if app_settings.is_testing else 10.0
             retry_delay = 0.01 if app_settings.is_testing else 0.5
 
+            headers: dict[str, str] = {}
+            if getattr(app_settings, "YOUTUBE_OAUTH_TOKEN", None):
+                headers["Authorization"] = f"Bearer {app_settings.YOUTUBE_OAUTH_TOKEN}"
+
             async def _do_http() -> dict[str, Any]:
                 async with httpx.AsyncClient(timeout=http_timeout) as http_client:
                     if http_method == "GET":
-                        response = await http_client.get(url, params=params_with_key)
+                        response = await http_client.get(url, params=params_with_key, headers=headers)
                     else:
                         response = await http_client.request(
-                            http_method, url, params=params_with_key, json=json_data
+                            http_method, url, params=params_with_key, json=json_data, headers=headers
                         )
+
+                    if response.status_code == 204:
+                        await self.key_pool.record_success(api_key)
+                        await self.key_pool.record_usage(api_key, cost)
+                        return {}
 
                     if response.status_code != 200:
                         error_msg = response.text
@@ -267,6 +276,56 @@ class YouTubeClient:
             next_page_token=data.get("nextPageToken"),
             polling_interval_millis=data.get("pollingIntervalMillis", 4000),
             offline_at=offline_at,
+        )
+
+    async def insert_live_chat_message(
+        self,
+        live_chat_id: str,
+        message_text: str,
+    ) -> dict[str, Any]:
+        """
+        Post a message to YouTube Live chat via liveChatMessages.insert (50 units).
+        """
+        if not live_chat_id or not message_text or not message_text.strip():
+            logger.warning("Attempted to insert live chat message with empty chat ID or message text.")
+            return {}
+
+        payload = {
+            "snippet": {
+                "liveChatId": live_chat_id,
+                "type": "textMessageEvent",
+                "textMessageDetails": {
+                    "messageText": message_text.strip(),
+                },
+            }
+        }
+        params = {"part": "snippet"}
+        return await self._request(
+            "liveChat/messages",
+            params=params,
+            method_name="liveChatMessages.insert",
+            quota_cost=50,
+            http_method="POST",
+            json_data=payload,
+        )
+
+    async def delete_live_chat_message(
+        self,
+        message_id: str,
+    ) -> dict[str, Any]:
+        """
+        Delete a live chat message via liveChatMessages.delete (50 units).
+        """
+        if not message_id:
+            logger.warning("Attempted to delete live chat message with empty message ID.")
+            return {}
+
+        return await self._request(
+            "liveChat/messages",
+            params={"id": message_id},
+            method_name="liveChatMessages.delete",
+            quota_cost=50,
+            http_method="DELETE",
         )
 
 

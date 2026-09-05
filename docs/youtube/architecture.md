@@ -43,7 +43,7 @@ flowchart TD
 ### 2.1 Quota Optimization & Two-Phase Reservation
 - **`YouTubeQuotaCostRegistry`**: Centralizes official YouTube Data API v3 costs (e.g. `videos.list=1`, `channels.list=1`, `liveChatMessages.list=1`, `liveChatMessages.streamList=1`, `search.list=100`). Prohibits expensive `search.list` calls.
 - **Two-Phase Reservation**:
-  1. `reserve(units)`: Verifies daily safety limit (`YOUTUBE_QUOTA_DAILY_LIMIT=4000`) and reserves quota atomically in memory/Redis before request dispatch.
+  1. `reserve(units)`: Verifies daily safety limit (`YOUTUBE_QUOTA_DAILY_LIMIT=40000`) and reserves quota atomically in memory/Redis before request dispatch.
   2. `release_if_not_dispatched()`: Refunds reservation if client encounters local validation failure prior to wire dispatch.
   3. `consume()` or `record_failure()`: Commits quota units upon wire delivery or conservative HTTP failure charging.
 

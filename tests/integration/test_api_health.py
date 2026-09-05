@@ -30,4 +30,4 @@ async def test_health_full_endpoint(client: AsyncClient):
     assert data["app_name"] == "goddess-ai-modrator"
     assert "workers" in data
     assert "youtube" in data
-    assert data["youtube"]["quota_daily_limit"] == 4000
+    assert data["youtube"]["quota_daily_limit"] == 40000

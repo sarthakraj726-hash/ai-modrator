@@ -30,7 +30,7 @@ class QuotaReservation:
 class QuotaManager:
     """
     Enforces a strict configurable application-level daily budget cap
-    (e.g., YOUTUBE_QUOTA_DAILY_LIMIT=4000) on YouTube API consumption.
+    (e.g., YOUTUBE_QUOTA_DAILY_LIMIT=40000) on YouTube API consumption.
     All YouTube API requests must pass through this layer.
     """
 

@@ -418,12 +418,12 @@ def render_control_center_html(environment: str, version: str) -> str:
       <div class="panel">
         <div class="panel-header">
           <div class="panel-title">⚡ YouTube API Quota Governance</div>
-          <span id="quota-budget-badge" class="badge">BUDGET: 4000 UNITS</span>
+          <span id="quota-budget-badge" class="badge">BUDGET: 40000 UNITS</span>
         </div>
         <div>
           <div style="display: flex; justify-content: space-between; font-size: 0.75rem; font-family: monospace;">
             <span id="quota-consumed-txt">Consumed: 0 units</span>
-            <span id="quota-remaining-txt" style="color: #34d399;">Remaining: 4000 (100%)</span>
+            <span id="quota-remaining-txt" style="color: #34d399;">Remaining: 40000 (100%)</span>
           </div>
           <div class="progress-bar">
             <div id="quota-progress-fill" class="progress-fill" style="width: 0%;"></div>
@@ -862,9 +862,10 @@ def render_control_center_html(environment: str, version: str) -> str:
       // Quota & Keys
       if (quota) {{
         const consumed = quota.consumed || 0;
-        const budget = quota.budget || 4000;
+        const budget = quota.budget || 40000;
         const rem = quota.remaining ?? (budget - consumed);
         const pct = quota.percent_used ?? Math.round((consumed/budget)*100);
+        document.getElementById("quota-budget-badge").textContent = `BUDGET: ${{budget}} UNITS`;
         document.getElementById("quota-consumed-txt").textContent = `Consumed: ${{consumed}} units`;
         document.getElementById("quota-remaining-txt").textContent = `Remaining: ${{rem}} (${{100 - pct}}%)`;
         document.getElementById("quota-progress-fill").style.width = `${{Math.min(pct, 100)}}%`;

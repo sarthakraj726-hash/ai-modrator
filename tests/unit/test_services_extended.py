@@ -98,4 +98,4 @@ async def test_health_service_deep_diagnostics(db_session: AsyncSession):
     assert system_health["app_name"] == "goddess-ai-modrator"
     assert "dependencies" in system_health
     assert "youtube" in system_health
-    assert system_health["youtube"]["quota_daily_limit"] == 4000
+    assert system_health["youtube"]["quota_daily_limit"] == 40000

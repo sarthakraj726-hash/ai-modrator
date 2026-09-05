@@ -48,14 +48,15 @@ class Settings(BaseSettings):
         description="Redis connection URL",
     )
 
-    # YouTube Data API v3 Key Pool
+    # YouTube Data API v3 Key Pool & Auth
     YOUTUBE_API_KEY_1: str = ""
     YOUTUBE_API_KEY_2: str = ""
     YOUTUBE_API_KEY_3: str = ""
+    YOUTUBE_OAUTH_TOKEN: str = ""
 
     # YouTube Daily Quota Hard Budget (Units per Day)
     YOUTUBE_QUOTA_DAILY_LIMIT: int = Field(
-        default=4000,
+        default=40000,
         ge=1,
         description="Hard daily cap for YouTube Data API units",
     )

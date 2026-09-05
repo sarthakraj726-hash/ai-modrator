@@ -180,6 +180,40 @@ class FakeYouTubeServer:
 
         # 3. /liveChat/messages endpoint
         if endpoint == "liveChat/messages":
+            if request.method == "POST":
+                import json
+
+                try:
+                    body = json.loads(request.content.decode("utf-8")) if request.content else {}
+                except Exception:
+                    body = {}
+                snippet = body.get("snippet", {})
+                chat_id = snippet.get("liveChatId") or query_params.get("liveChatId", [""])[0]
+                text_details = snippet.get("textMessageDetails", {})
+                msg_text = text_details.get("messageText", "")
+
+                new_msg = {
+                    "kind": "youtube#liveChatMessage",
+                    "id": f"msg_mock_{len(self.request_history)}",
+                    "snippet": {
+                        "liveChatId": chat_id,
+                        "type": snippet.get("type", "textMessageEvent"),
+                        "displayMessage": msg_text,
+                        "publishedAt": "2026-09-05T12:00:00Z",
+                    },
+                    "authorDetails": {
+                        "channelId": "UC_BOT_CHANNEL",
+                        "displayName": "Goddess AI",
+                        "isChatModerator": True,
+                    },
+                }
+                if chat_id in self.chat_messages_database:
+                    self.chat_messages_database[chat_id].append(new_msg)
+                return httpx.Response(200, json=new_msg)
+
+            if request.method == "DELETE":
+                return httpx.Response(204)
+
             chat_id = query_params.get("liveChatId", [""])[0]
             is_offline = self.chat_offline_database.get(chat_id, False)
             messages = self.chat_messages_database.get(chat_id, [])

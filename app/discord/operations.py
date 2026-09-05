@@ -267,7 +267,7 @@ class DiscordOperationsService:
                 },
                 {
                     "name": "Quota Consumed",
-                    "value": f"{summary_data.get('quota_used', 0)} / 4000",
+                    "value": f"{summary_data.get('quota_used', 0)} / {summary_data.get('quota_budget', 40000)}",
                     "inline": True,
                 },
                 {

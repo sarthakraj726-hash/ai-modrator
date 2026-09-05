@@ -5,7 +5,7 @@
 The standard YouTube Data API v3 daily quota is **10,000 units** per Google Cloud project (resetting at 00:00 PST / 08:00 UTC).
 
 In `GODDESS AI / AI-MODRATOR`, we configure a strict safety cap:
-- **`YOUTUBE_QUOTA_DAILY_LIMIT`**: **4,000 units** (default, leaving 6,000 units headroom for manual interventions and third-party tools).
+- **`YOUTUBE_QUOTA_DAILY_LIMIT`**: **40,000 units** (default, scalable for high-volume live chat co-hosting and moderation).
 - **Hard Enforcement**: Once reserved units reach `YOUTUBE_QUOTA_DAILY_LIMIT`, all subsequent outgoing calls throw `QuotaExceededError` before hitting the network.
 
 ---

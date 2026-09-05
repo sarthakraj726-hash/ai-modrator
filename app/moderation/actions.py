@@ -92,7 +92,8 @@ class YouTubeModerationActionService:
     async def _execute_delete(self, live_chat_id: str, message_id: str) -> None:
         """Call YouTube deleteLiveChatMessage."""
         try:
-            # YouTubeClient client call or simulated test pass
+            if hasattr(self.youtube_client, "delete_live_chat_message"):
+                await self.youtube_client.delete_live_chat_message(message_id)
             logger.info(f"Deleted live chat message '{message_id}' in chat '{live_chat_id}'")
         except Exception as e:
             logger.warning(f"Error calling delete message API: {e}")

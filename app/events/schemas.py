@@ -109,7 +109,7 @@ class YouTubeKeyCooldownEvent(BaseEvent):
 class YouTubeQuotaWarningEvent(BaseEvent):
     event_type: Literal["YouTubeQuotaWarning"] = "YouTubeQuotaWarning"
     used_units: int = 0
-    daily_budget: int = 4000
+    daily_budget: int = 40000
     percentage_used: float = 0.0
 
 

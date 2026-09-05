@@ -36,7 +36,7 @@ In the Railway API Service settings, configure the following variables (Railway 
 | `YOUTUBE_API_KEY_1` | Primary YouTube Data API key | `AIzaSy...` |
 | `YOUTUBE_API_KEY_2` | Secondary YouTube Data API key | `AIzaSy...` |
 | `YOUTUBE_API_KEY_3` | Tertiary YouTube Data API key | `AIzaSy...` |
-| `YOUTUBE_QUOTA_DAILY_LIMIT` | Hard daily quota cap | `4000` |
+| `YOUTUBE_QUOTA_DAILY_LIMIT` | Hard daily quota cap | `40000` |
 | `OPENROUTER_API_KEY` | OpenRouter API Key (Future AI) | `sk-or-v1-...` |
 | `DISCORD_BOT_TOKEN` | Discord Bot Token (Future Logs) | `MTA...` |
 

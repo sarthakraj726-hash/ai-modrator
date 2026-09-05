@@ -52,7 +52,7 @@ class SystemMetricSnapshot(Base, TimestampMixin):
     )
     quota_remaining: Mapped[int] = mapped_column(
         Integer,
-        default=4000,
+        default=40000,
         nullable=False,
     )
     metrics: Mapped[dict[str, Any]] = mapped_column(

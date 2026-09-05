@@ -200,6 +200,9 @@ class StreamWorkerSession:
             await self.chat_transport.connect()
             self.state = WorkerState.RUNNING
 
+            # Post introductory join message to live chat
+            await self._send_join_message()
+
             await event_bus.publish(
                 StreamStartedEvent(
                     creator_id=self.creator_id,
@@ -314,6 +317,37 @@ class StreamWorkerSession:
             if self.state not in (WorkerState.ERROR, WorkerState.STOPPED, WorkerState.ENDED):
                 self.state = WorkerState.STOPPED
             self.stopped_at = datetime.now(UTC)
+
+    async def _send_join_message(self) -> None:
+        """Post a welcoming greeting message upon joining the live stream."""
+        if not self.live_chat_id:
+            return
+
+        greeting = "✨ Goddess AI is now connected! I'm here co-hosting and moderating the chat. Hello everyone! ✨"
+        try:
+            from app.persona.engine import get_persona_engine
+            from app.persona.models import PersonaProfile, PersonaType
+
+            persona_engine = get_persona_engine()
+            profile = PersonaProfile(creator_id=self.creator_id, persona_type=PersonaType.CO_HOST)
+            remark = persona_engine.format_cohost_remark(profile, "stream_started")
+            if remark:
+                greeting = f"✨ Goddess AI is now connected! {remark} ✨"
+        except Exception as pe_exc:
+            logger.debug(f"Could not load persona remark for join message: {pe_exc}")
+
+        try:
+            logger.info(f"Posting join message to chat '{self.live_chat_id}': {greeting}")
+            await self.youtube_client.insert_live_chat_message(
+                live_chat_id=self.live_chat_id,
+                message_text=greeting,
+            )
+            logger.info(f"Successfully posted join message to live chat '{self.live_chat_id}'")
+        except Exception as exc:
+            # Non-fatal error boundary: API keys may lack OAuth write permissions or chat is restricted
+            logger.warning(
+                f"Could not post join greeting to live chat '{self.live_chat_id}' (continuing chat monitoring): {exc}"
+            )
 
     def get_status(self) -> dict[str, Any]:
         """Return runtime diagnostic snapshot for observability."""

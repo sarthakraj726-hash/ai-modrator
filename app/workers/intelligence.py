@@ -33,6 +33,7 @@ from app.persona.triggers import (
     StreamState,
     TriggerType,
 )
+from app.youtube.client import YouTubeClient, get_youtube_client
 from app.youtube.models import YouTubeAuthor, YouTubeChatMessage
 
 logger = get_logger("app.workers.intelligence")
@@ -58,6 +59,7 @@ class StreamIntelligenceCoordinator:
         xp_manager: XPManager | None = None,
         game_engine: MiniGameEngine | None = None,
         session_factory: Any | None = None,
+        youtube_client: YouTubeClient | None = None,
     ) -> None:
         self.event_bus = event_bus or get_event_bus()
         self.moderation_engine = moderation_engine or get_moderation_engine()
@@ -65,6 +67,11 @@ class StreamIntelligenceCoordinator:
         self.ai_provider = ai_provider or get_ai_provider()
         self.action_service = action_service or get_action_service()
         self.budget_manager = budget_manager or get_ai_budget_manager()
+        self.youtube_client = (
+            youtube_client
+            or getattr(self.action_service, "youtube_client", None)
+            or get_youtube_client()
+        )
         self.context_engine = StreamContextEngine()
 
         self.xp_manager = xp_manager or XPManager()
@@ -214,6 +221,9 @@ class StreamIntelligenceCoordinator:
                         logger.info(
                             f"[Command Reply to @{author_name}]: {cmd_result.response_message}"
                         )
+                        await self._send_chat_message_safe(
+                            event.live_chat_id, cmd_result.response_message
+                        )
                     return
 
                 # 3b. Evaluate active mini-game guess
@@ -228,6 +238,9 @@ class StreamIntelligenceCoordinator:
                 if won and win_announcement:
                     await session.commit()
                     logger.info(f"[Mini-Game Win]: {win_announcement}")
+                    await self._send_chat_message_safe(
+                        event.live_chat_id, win_announcement
+                    )
                     return
 
                 # 3c. Anti-Farming XP Award
@@ -282,6 +295,24 @@ class StreamIntelligenceCoordinator:
                 tokens_used=40,
             )
             logger.info(f"[Honney Co-Host to @{author_name}]: {reply_text}")
+            await self._send_chat_message_safe(event.live_chat_id, reply_text)
+
+    async def _send_chat_message_safe(
+        self, live_chat_id: str | None, message_text: str
+    ) -> None:
+        """Deliver outgoing chat message to YouTube Live chat safely."""
+        if not live_chat_id or not message_text or not message_text.strip():
+            return
+        try:
+            if self.youtube_client:
+                await self.youtube_client.insert_live_chat_message(
+                    live_chat_id=live_chat_id,
+                    message_text=message_text.strip(),
+                )
+        except Exception as e:
+            logger.warning(
+                f"Could not deliver outgoing message to live chat '{live_chat_id}': {e}"
+            )
 
     async def _generate_cohost_reply(
         self,
