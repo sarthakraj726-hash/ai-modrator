@@ -115,15 +115,19 @@ class HealthMonitorService:
                 except Exception:
                     pass
 
+            import app.db.session as db_session
+
             return {
                 "status": SubsystemStatus.HEALTHY,
                 "latency_ms": round(latency_ms, 2),
                 "dialect": dialect,
                 "tables_count": len(table_names),
+                "table_names": sorted(table_names),
                 "has_stream_sessions": "stream_sessions" in table_names,
                 "has_creators": "creators" in table_names,
                 "has_economy_ledger": "economy_ledger_entries" in table_names,
                 "alembic_version": alembic_ver,
+                "schema_init_log": getattr(db_session, "_schema_init_log", None),
                 "message": f"Database connected ({dialect}, {len(table_names)} tables, rev: {alembic_ver})",
             }
         except Exception as e:

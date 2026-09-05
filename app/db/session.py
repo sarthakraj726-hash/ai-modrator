@@ -64,8 +64,13 @@ def async_session_maker() -> AsyncSession:
     return get_session_factory()()
 
 
+_schema_init_log: list[str] = []
+
+
 async def init_db_engine() -> None:
     """Initialize database engine, run schema migrations, and ensure default records."""
+    global _schema_init_log
+    _schema_init_log = []
     engine = get_engine()
     settings = get_settings()
 
@@ -74,17 +79,30 @@ async def init_db_engine() -> None:
         import asyncio
 
         from alembic.config import Config
-
         from alembic import command
 
         def _upgrade() -> None:
             alembic_cfg = Config("alembic.ini", attributes={"configure_logger": False})
-            command.upgrade(alembic_cfg, "head")
+            try:
+                command.upgrade(alembic_cfg, "head")
+                _schema_init_log.append("alembic: upgraded to head")
+                logger.info("Database schema migrations verified and up-to-date (head)")
+            except Exception as e:
+                err_msg = str(e)
+                _schema_init_log.append(f"alembic upgrade warning: {err_msg}")
+                logger.warning(f"Alembic auto-migration note: {err_msg}")
+                if "002_add_join_message_sent" in err_msg or "Can't locate revision" in err_msg:
+                    try:
+                        command.stamp(alembic_cfg, "head")
+                        _schema_init_log.append("alembic: stamped to head after foreign revision detected")
+                        logger.info("Alembic schema stamped to head successfully")
+                    except Exception as stamp_err:
+                        _schema_init_log.append(f"alembic stamp error: {stamp_err}")
 
         await asyncio.to_thread(_upgrade)
-        logger.info("Database schema migrations verified and up-to-date (head)")
     except Exception as mig_err:
-        logger.warning(f"Alembic auto-migration warning: {mig_err}")
+        _schema_init_log.append(f"alembic thread error: {mig_err}")
+        logger.warning(f"Alembic auto-migration thread warning: {mig_err}")
 
     # 2. Schema guarantee: Ensure all Base.metadata tables exist across all environments
     import app.db.models  # noqa: F401
@@ -92,9 +110,21 @@ async def init_db_engine() -> None:
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        _schema_init_log.append("Base.metadata.create_all: success")
         logger.info("Database schema Base.metadata verified (all tables exist)")
     except Exception as schema_err:
+        _schema_init_log.append(f"Base.metadata.create_all warning: {schema_err}")
         logger.warning(f"Base.metadata.create_all notification: {schema_err}")
+
+    # 3. Individual Table Fallback Guarantee: ensure each table exists independently
+    for table in Base.metadata.sorted_tables:
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(table.create, checkfirst=True)
+            _schema_init_log.append(f"table.create({table.name}): verified/created")
+        except Exception as tbl_err:
+            _schema_init_log.append(f"table.create({table.name}) warning: {tbl_err}")
+            logger.warning(f"Note creating table {table.name}: {tbl_err}")
 
     # 3. Seed default creator if empty
     try:
