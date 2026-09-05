@@ -164,3 +164,31 @@ async def test_moderation_queue_attribute_safety_and_serialization(
     assert item["message_text"] == "Inappropriate comment"
     assert item["confidence"] == 85
     assert item["severity"] == 90
+
+
+@pytest.mark.asyncio
+async def test_all_core_schema_tables_exist_and_queryable(db_session: AsyncSession):
+    """Verify stream_sessions, economy_ledger_entries, and all core tables exist and can be queried."""
+    from sqlalchemy import func, select
+
+    from app.db.models.creator import Creator
+    from app.db.models.economy import EconomyLedgerEntry
+    from app.db.models.monitored_channel import MonitoredChannel
+    from app.db.models.stream_session import StreamSession
+
+    # Verify stream_sessions query does not raise UndefinedTableError
+    res_streams = await db_session.execute(select(func.count(StreamSession.id)))
+    assert res_streams.scalar() >= 0
+
+    # Verify creators query
+    res_creators = await db_session.execute(select(func.count(Creator.id)))
+    assert res_creators.scalar() >= 0
+
+    # Verify economy_ledger_entries query
+    res_ledger = await db_session.execute(select(func.count(EconomyLedgerEntry.id)))
+    assert res_ledger.scalar() >= 0
+
+    # Verify monitored_channels query
+    res_channels = await db_session.execute(select(func.count(MonitoredChannel.id)))
+    assert res_channels.scalar() >= 0
+

@@ -5,12 +5,11 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+# Ensure all models are imported so Base.metadata is populated
+import app.db.models  # noqa: F401
 from alembic import context
 from app.core.config import get_settings
 from app.db.base import Base
-
-# Ensure all models are imported so Base.metadata is populated
-from app.db.models import AuditEvent, Creator, StreamSession, SystemEvent  # noqa: F401
 
 config = context.config
 
@@ -28,12 +27,13 @@ def get_db_url() -> str:
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
     url = get_db_url()
+    is_sqlite = "sqlite" in url.lower()
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,
+        render_as_batch=is_sqlite,
     )
 
     with context.begin_transaction():
@@ -41,10 +41,11 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    is_sqlite = connection.dialect.name == "sqlite"
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        render_as_batch=True,
+        render_as_batch=is_sqlite,
     )
 
     with context.begin_transaction():

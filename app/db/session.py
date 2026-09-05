@@ -86,10 +86,17 @@ async def init_db_engine() -> None:
     except Exception as mig_err:
         logger.warning(f"Alembic auto-migration warning: {mig_err}")
 
-    # 2. Testing / SQLite fallback
-    if settings.is_testing or "sqlite" in settings.DATABASE_URL:
+    # 2. Schema guarantee: Ensure all Base.metadata tables exist across all environments
+    import app.db.models  # noqa: F401
+
+    try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database schema Base.metadata verified (all tables exist)")
+    except Exception as schema_err:
+        logger.error(f"Error ensuring database tables in Base.metadata: {schema_err}")
+        if settings.is_production:
+            raise
 
     # 3. Seed default creator if empty
     try:

@@ -95,11 +95,36 @@ class HealthMonitorService:
             await self.session.execute(text("SELECT 1"))
             latency_ms = (time.perf_counter() - start) * 1000
             dialect = self.session.bind.dialect.name if self.session.bind else "sqlite"
+
+            # Query existing tables and migration revision
+            table_names: list[str] = []
+            if dialect == "postgresql":
+                res = await self.session.execute(
+                    text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+                )
+                table_names = [r[0] for r in res.fetchall()]
+            else:
+                res = await self.session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+                table_names = [r[0] for r in res.fetchall()]
+
+            alembic_ver = None
+            if "alembic_version" in table_names:
+                try:
+                    ver_res = await self.session.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))
+                    alembic_ver = ver_res.scalar()
+                except Exception:
+                    pass
+
             return {
                 "status": SubsystemStatus.HEALTHY,
                 "latency_ms": round(latency_ms, 2),
                 "dialect": dialect,
-                "message": f"Database connected ({dialect})",
+                "tables_count": len(table_names),
+                "has_stream_sessions": "stream_sessions" in table_names,
+                "has_creators": "creators" in table_names,
+                "has_economy_ledger": "economy_ledger_entries" in table_names,
+                "alembic_version": alembic_ver,
+                "message": f"Database connected ({dialect}, {len(table_names)} tables, rev: {alembic_ver})",
             }
         except Exception as e:
             logger.error(f"Database health check failure: {e}")
