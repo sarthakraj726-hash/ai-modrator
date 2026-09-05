@@ -2,7 +2,7 @@
 
 Revision ID: 0008_reconcile_missing_core_tables
 Revises: 0007_create_monitored_channels
-Create Date: 2026-09-05 14:50:00.000000
+Create Date: 2026-09-05 15:20:00.000000
 
 """
 from typing import Sequence, Union
@@ -28,8 +28,12 @@ def upgrade() -> None:
 
     def safe_idx(name: str, table: str, cols: list[str], unique: bool = False) -> None:
         try:
-            current_idxs = {i["name"] for i in insp.get_indexes(table)}
-            if name not in current_idxs:
+            is_pg = bind.dialect.name == "postgresql"
+            if is_pg:
+                uniq_clause = "UNIQUE " if unique else ""
+                col_clause = ", ".join(f'"{c}"' for c in cols)
+                bind.execute(sa.text(f'CREATE {uniq_clause}INDEX IF NOT EXISTS "{name}" ON "{table}" ({col_clause});'))
+            else:
                 op.create_index(name, table, cols, unique=unique)
         except Exception:
             pass
@@ -84,9 +88,9 @@ def upgrade() -> None:
         op.create_table(
             "audit_events",
             sa.Column("id", sa.String(length=36), nullable=False),
-            sa.Column("event_type", sa.String(length=64), nullable=False),
             sa.Column("creator_id", sa.String(length=36), nullable=True),
             sa.Column("stream_session_id", sa.String(length=36), nullable=True),
+            sa.Column("event_type", sa.String(length=64), nullable=False),
             sa.Column("actor_type", sa.String(length=32), nullable=False, server_default="SYSTEM"),
             sa.Column("actor_id", sa.String(length=128), nullable=True),
             sa.Column("payload", json_type, nullable=False),
@@ -170,17 +174,24 @@ def upgrade() -> None:
             sa.Column("creator_id", sa.String(length=36), nullable=True),
             sa.Column("channel_id", sa.String(length=64), nullable=False),
             sa.Column("video_id", sa.String(length=64), nullable=False),
-            sa.Column("event_type", sa.String(length=32), nullable=False),
-            sa.Column("source", sa.String(length=32), nullable=False),
-            sa.Column("raw_payload", json_type, nullable=False),
+            sa.Column("event_type", sa.String(length=64), nullable=False, server_default="WEBSUB_NOTIFICATION"),
+            sa.Column("source", sa.String(length=64), nullable=False, server_default="websub"),
+            sa.Column("dedupe_hash", sa.String(length=64), nullable=False),
             sa.Column("processed", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("payload", json_type, nullable=False),
+            sa.Column("received_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
             sa.PrimaryKeyConstraint("id", name=op.f("pk_youtube_discovery_events")),
         )
+        safe_idx(op.f("ix_youtube_discovery_events_creator_id"), "youtube_discovery_events", ["creator_id"], unique=False)
         safe_idx(op.f("ix_youtube_discovery_events_channel_id"), "youtube_discovery_events", ["channel_id"], unique=False)
         safe_idx(op.f("ix_youtube_discovery_events_video_id"), "youtube_discovery_events", ["video_id"], unique=False)
+        safe_idx(op.f("ix_youtube_discovery_events_event_type"), "youtube_discovery_events", ["event_type"], unique=False)
+        safe_idx(op.f("ix_youtube_discovery_events_dedupe_hash"), "youtube_discovery_events", ["dedupe_hash"], unique=False)
         safe_idx(op.f("ix_youtube_discovery_events_processed"), "youtube_discovery_events", ["processed"], unique=False)
-        safe_idx("ix_discovery_channel_video", "youtube_discovery_events", ["channel_id", "video_id"], unique=False)
+        safe_idx(op.f("ix_youtube_discovery_events_received_at"), "youtube_discovery_events", ["received_at"], unique=False)
+        safe_idx("ix_discovery_dedupe_processed", "youtube_discovery_events", ["dedupe_hash", "processed"], unique=False)
+        safe_idx("ix_discovery_video_processed", "youtube_discovery_events", ["video_id", "processed"], unique=False)
         existing_tables.add("youtube_discovery_events")
 
     # -------------------------------------------------------------------------
@@ -191,16 +202,17 @@ def upgrade() -> None:
             "youtube_checkpoints",
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("stream_session_id", sa.String(length=36), nullable=False),
-            sa.Column("live_chat_id", sa.String(length=128), nullable=False),
-            sa.Column("page_token", sa.String(length=255), nullable=True),
-            sa.Column("last_message_timestamp", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("message_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("last_next_page_token", sa.String(length=255), nullable=True),
+            sa.Column("last_message_id", sa.String(length=128), nullable=True),
+            sa.Column("last_received_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("total_messages_ingested", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.ForeignKeyConstraint(["stream_session_id"], ["stream_sessions.id"], name=op.f("fk_checkpoints_session_id_stream_sessions"), ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id", name=op.f("pk_youtube_checkpoints")),
+            sa.UniqueConstraint("stream_session_id", name="uq_youtube_checkpoints_stream_session_id"),
         )
-        safe_idx(op.f("ix_youtube_checkpoints_stream_session_id"), "youtube_checkpoints", ["stream_session_id"], unique=False)
-        safe_idx(op.f("ix_youtube_checkpoints_live_chat_id"), "youtube_checkpoints", ["live_chat_id"], unique=False)
+        safe_idx(op.f("ix_youtube_checkpoints_stream_session_id"), "youtube_checkpoints", ["stream_session_id"], unique=True)
         existing_tables.add("youtube_checkpoints")
 
     # -------------------------------------------------------------------------
@@ -211,21 +223,26 @@ def upgrade() -> None:
             "viewer_trust_profiles",
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("creator_id", sa.String(length=36), nullable=False),
-            sa.Column("author_channel_id", sa.String(length=128), nullable=False),
-            sa.Column("author_display_name", sa.String(length=255), nullable=False),
+            sa.Column("viewer_channel_id", sa.String(length=128), nullable=False),
+            sa.Column("display_name", sa.String(length=255), nullable=False),
             sa.Column("trust_score", sa.Integer(), nullable=False, server_default="50"),
-            sa.Column("flags_count", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("timeouts_count", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("approved_count", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("notes", sa.Text(), nullable=True),
+            sa.Column("first_seen_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("messages_seen", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("positive_interactions", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("warning_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("timeout_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("hide_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("last_greeting_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("creator_id", "author_channel_id", name="uq_viewer_trust_creator_author"),
+            sa.UniqueConstraint("creator_id", "viewer_channel_id", name="uq_viewer_trust_creator_channel"),
         )
         safe_idx(op.f("ix_viewer_trust_profiles_creator_id"), "viewer_trust_profiles", ["creator_id"])
-        safe_idx(op.f("ix_viewer_trust_profiles_author_channel_id"), "viewer_trust_profiles", ["author_channel_id"])
+        safe_idx(op.f("ix_viewer_trust_profiles_viewer_channel_id"), "viewer_trust_profiles", ["viewer_channel_id"])
+        safe_idx("ix_viewer_trust_score", "viewer_trust_profiles", ["creator_id", "trust_score"])
         existing_tables.add("viewer_trust_profiles")
 
     # -------------------------------------------------------------------------
@@ -235,25 +252,30 @@ def upgrade() -> None:
         op.create_table(
             "ai_usage_records",
             sa.Column("id", sa.String(length=36), nullable=False),
-            sa.Column("creator_id", sa.String(length=36), nullable=False),
+            sa.Column("creator_id", sa.String(length=36), nullable=True),
             sa.Column("stream_session_id", sa.String(length=36), nullable=True),
-            sa.Column("feature", sa.String(length=32), nullable=False),
-            sa.Column("model", sa.String(length=64), nullable=False),
+            sa.Column("provider", sa.String(length=64), nullable=False, server_default="openrouter"),
+            sa.Column("model", sa.String(length=128), nullable=False),
+            sa.Column("task_type", sa.String(length=64), nullable=False),
             sa.Column("prompt_tokens", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("completion_tokens", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("total_tokens", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("estimated_cost_usd", sa.Float(), nullable=False, server_default="0.0"),
-            sa.Column("latency_ms", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("latency_ms", sa.Float(), nullable=False, server_default="0.0"),
             sa.Column("success", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("fallback_used", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+            sa.Column("error_message", sa.Text(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-            sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(["stream_session_id"], ["stream_sessions.id"], ondelete="SET NULL"),
             sa.PrimaryKeyConstraint("id"),
         )
         safe_idx(op.f("ix_ai_usage_records_creator_id"), "ai_usage_records", ["creator_id"])
         safe_idx(op.f("ix_ai_usage_records_stream_session_id"), "ai_usage_records", ["stream_session_id"])
-        safe_idx(op.f("ix_ai_usage_records_created_at"), "ai_usage_records", ["created_at"])
-        safe_idx("ix_ai_usage_creator_created", "ai_usage_records", ["creator_id", "created_at"])
+        safe_idx(op.f("ix_ai_usage_records_model"), "ai_usage_records", ["model"])
+        safe_idx(op.f("ix_ai_usage_records_task_type"), "ai_usage_records", ["task_type"])
+        safe_idx("ix_ai_usage_creator_task", "ai_usage_records", ["creator_id", "task_type"])
+        safe_idx("ix_ai_usage_created_at", "ai_usage_records", ["created_at"])
         existing_tables.add("ai_usage_records")
 
     # -------------------------------------------------------------------------
@@ -265,24 +287,27 @@ def upgrade() -> None:
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("creator_id", sa.String(length=36), nullable=False),
             sa.Column("ai_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-            sa.Column("persona_name", sa.String(length=64), nullable=False, server_default="Goddess"),
-            sa.Column("system_prompt_override", sa.Text(), nullable=True),
-            sa.Column("primary_model", sa.String(length=64), nullable=False, server_default="anthropic/claude-3.5-sonnet"),
-            sa.Column("fallback_model", sa.String(length=64), nullable=False, server_default="mistralai/mistral-large-2411"),
-            sa.Column("strictness_level", sa.String(length=16), nullable=False, server_default="standard"),
+            sa.Column("persona_type", sa.String(length=32), nullable=False, server_default="CO_HOST"),
+            sa.Column("persona_sliders", json_type, nullable=False),
+            sa.Column("custom_persona_prompt", sa.Text(), nullable=True),
+            sa.Column("moderation_strictness", sa.String(length=32), nullable=False, server_default="BALANCED"),
+            sa.Column("moderation_mode", sa.String(length=32), nullable=False, server_default="ACTIVE"),
             sa.Column("auto_moderation_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("hitl_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("ai_reply_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("greeting_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("farewell_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("quiet_mode_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+            sa.Column("max_ai_messages_per_minute", sa.Integer(), nullable=False, server_default="10"),
+            sa.Column("ai_daily_budget", sa.Integer(), nullable=False, server_default="1000"),
+            sa.Column("custom_rules", json_type, nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("creator_id", name="uq_creator_ai_settings_creator_id"),
         )
-        safe_idx("ix_creator_ai_settings_creator_id", "creator_ai_settings", ["creator_id"], unique=True)
+        safe_idx(op.f("ix_creator_ai_settings_creator_id"), "creator_ai_settings", ["creator_id"], unique=True)
         existing_tables.add("creator_ai_settings")
 
     # -------------------------------------------------------------------------
@@ -295,7 +320,7 @@ def upgrade() -> None:
             sa.Column("creator_id", sa.String(length=36), nullable=False),
             sa.Column("name", sa.String(length=64), nullable=False),
             sa.Column("response", sa.Text(), nullable=False),
-            sa.Column("min_role", sa.String(length=32), nullable=False, server_default="EVERYONE"),
+            sa.Column("min_role", sa.String(length=32), nullable=False, server_default="VIEWER"),
             sa.Column("cooldown_seconds", sa.Integer(), nullable=False, server_default="5"),
             sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
@@ -323,7 +348,7 @@ def upgrade() -> None:
             sa.UniqueConstraint("creator_id", "alias", name="uq_command_aliases_creator_alias"),
         )
         safe_idx("ix_command_aliases_creator_id", "command_aliases", ["creator_id"])
-        safe_idx("ix_command_aliases_target_id", "command_aliases", ["target_command_id"])
+        safe_idx("ix_command_aliases_creator_alias", "command_aliases", ["creator_id", "alias"])
         existing_tables.add("command_aliases")
 
     # -------------------------------------------------------------------------
@@ -335,23 +360,25 @@ def upgrade() -> None:
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("creator_id", sa.String(length=36), nullable=False),
             sa.Column("viewer_channel_id", sa.String(length=128), nullable=False),
-            sa.Column("viewer_name", sa.String(length=255), nullable=False),
-            sa.Column("xp", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("display_name", sa.String(length=255), nullable=False),
+            sa.Column("total_xp", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("level", sa.Integer(), nullable=False, server_default="1"),
-            sa.Column("message_count", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("command_count", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("watch_time_minutes", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("messages_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("games_played", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("games_won", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("store_purchases", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("last_xp_awarded_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("last_active_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("creator_id", "viewer_channel_id", name="uq_viewer_engagements_creator_viewer"),
+            sa.UniqueConstraint("creator_id", "viewer_channel_id", name="uq_viewer_engagement_creator_viewer"),
         )
         safe_idx("ix_viewer_engagements_creator_id", "viewer_engagements", ["creator_id"])
         safe_idx("ix_viewer_engagements_viewer_channel_id", "viewer_engagements", ["viewer_channel_id"])
-        safe_idx("ix_viewer_engagements_xp", "viewer_engagements", ["xp"])
-        safe_idx("ix_viewer_engagements_creator_xp", "viewer_engagements", ["creator_id", "xp"])
+        safe_idx("ix_viewer_engagement_xp", "viewer_engagements", ["creator_id", "total_xp"])
+        safe_idx("ix_viewer_engagement_level", "viewer_engagements", ["creator_id", "level"])
         existing_tables.add("viewer_engagements")
 
     # -------------------------------------------------------------------------
@@ -362,18 +389,19 @@ def upgrade() -> None:
             "economy_accounts",
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("creator_id", sa.String(length=36), nullable=False),
-            sa.Column("account_holder_type", sa.String(length=32), nullable=False),
-            sa.Column("account_holder_id", sa.String(length=128), nullable=False),
-            sa.Column("account_type", sa.String(length=32), nullable=False),
+            sa.Column("viewer_channel_id", sa.String(length=128), nullable=True),
+            sa.Column("account_type", sa.String(length=32), nullable=False, server_default="VIEWER"),
             sa.Column("balance", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("creator_id", "account_holder_type", "account_holder_id", "account_type", name="uq_economy_accounts_holder_type"),
+            sa.UniqueConstraint("creator_id", "viewer_channel_id", "account_type", name="uq_economy_account_creator_viewer_type"),
         )
         safe_idx("ix_economy_accounts_creator_id", "economy_accounts", ["creator_id"])
-        safe_idx("ix_economy_accounts_holder_id", "economy_accounts", ["account_holder_id"])
+        safe_idx("ix_economy_accounts_viewer_channel_id", "economy_accounts", ["viewer_channel_id"])
+        safe_idx("ix_economy_account_creator_balance", "economy_accounts", ["creator_id", "balance"])
         existing_tables.add("economy_accounts")
 
     if "economy_transactions" not in existing_tables:
@@ -381,17 +409,18 @@ def upgrade() -> None:
             "economy_transactions",
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("creator_id", sa.String(length=36), nullable=False),
-            sa.Column("idempotency_key", sa.String(length=128), nullable=False),
             sa.Column("transaction_type", sa.String(length=32), nullable=False),
-            sa.Column("amount", sa.Integer(), nullable=False),
-            sa.Column("reference", sa.String(length=255), nullable=True),
+            sa.Column("reference_type", sa.String(length=64), nullable=True),
+            sa.Column("reference_id", sa.String(length=128), nullable=True),
+            sa.Column("idempotency_key", sa.String(length=128), nullable=False),
+            sa.Column("description", sa.String(length=255), nullable=False, server_default=""),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("creator_id", "idempotency_key", name="uq_economy_transactions_creator_idempotency"),
+            sa.UniqueConstraint("creator_id", "idempotency_key", name="uq_economy_tx_creator_idempotency"),
         )
         safe_idx("ix_economy_transactions_creator_id", "economy_transactions", ["creator_id"])
-        safe_idx("ix_economy_transactions_idempotency", "economy_transactions", ["idempotency_key"])
+        safe_idx("ix_economy_tx_creator_created", "economy_transactions", ["creator_id", "created_at"])
         existing_tables.add("economy_transactions")
 
     if "economy_ledger_entries" not in existing_tables:
@@ -402,6 +431,7 @@ def upgrade() -> None:
             sa.Column("account_id", sa.String(length=36), nullable=False),
             sa.Column("direction", sa.String(length=16), nullable=False),
             sa.Column("amount", sa.Integer(), nullable=False),
+            sa.Column("balance_after", sa.Integer(), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["account_id"], ["economy_accounts.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["transaction_id"], ["economy_transactions.id"], ondelete="CASCADE"),
@@ -409,6 +439,7 @@ def upgrade() -> None:
         )
         safe_idx("ix_economy_ledger_entries_transaction_id", "economy_ledger_entries", ["transaction_id"])
         safe_idx("ix_economy_ledger_entries_account_id", "economy_ledger_entries", ["account_id"])
+        safe_idx("ix_economy_ledger_account_created", "economy_ledger_entries", ["account_id", "created_at"])
         existing_tables.add("economy_ledger_entries")
 
     # -------------------------------------------------------------------------
@@ -419,19 +450,21 @@ def upgrade() -> None:
             "store_items",
             sa.Column("id", sa.String(length=36), nullable=False),
             sa.Column("creator_id", sa.String(length=36), nullable=False),
-            sa.Column("name", sa.String(length=128), nullable=False),
-            sa.Column("description", sa.Text(), nullable=True),
+            sa.Column("name", sa.String(length=64), nullable=False),
+            sa.Column("description", sa.Text(), nullable=False, server_default=""),
             sa.Column("price", sa.Integer(), nullable=False),
-            sa.Column("item_type", sa.String(length=32), nullable=False),
-            sa.Column("max_per_user", sa.Integer(), nullable=False, server_default="1"),
-            sa.Column("stock_remaining", sa.Integer(), nullable=True),
+            sa.Column("stock", sa.Integer(), nullable=False, server_default="-1"),
+            sa.Column("max_per_user", sa.Integer(), nullable=False, server_default="-1"),
+            sa.Column("cooldown_seconds", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("creator_id", "name", name="uq_store_items_creator_name"),
         )
         safe_idx("ix_store_items_creator_id", "store_items", ["creator_id"])
+        safe_idx("ix_store_items_creator_enabled", "store_items", ["creator_id", "enabled"])
         existing_tables.add("store_items")
 
     if "viewer_inventories" not in existing_tables:
@@ -442,10 +475,12 @@ def upgrade() -> None:
             sa.Column("viewer_channel_id", sa.String(length=128), nullable=False),
             sa.Column("item_id", sa.String(length=36), nullable=False),
             sa.Column("quantity", sa.Integer(), nullable=False, server_default="1"),
-            sa.Column("acquired_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("first_acquired_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("last_acquired_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["item_id"], ["store_items.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("creator_id", "viewer_channel_id", "item_id", name="uq_viewer_inventory_creator_viewer_item"),
         )
         safe_idx("ix_viewer_inventories_creator_id", "viewer_inventories", ["creator_id"])
         safe_idx("ix_viewer_inventories_viewer_channel_id", "viewer_inventories", ["viewer_channel_id"])
@@ -462,16 +497,23 @@ def upgrade() -> None:
             sa.Column("creator_id", sa.String(length=36), nullable=False),
             sa.Column("stream_session_id", sa.String(length=36), nullable=False),
             sa.Column("game_type", sa.String(length=32), nullable=False),
-            sa.Column("status", sa.String(length=32), nullable=False, server_default="PENDING"),
-            sa.Column("pot_amount", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("winner_id", sa.String(length=128), nullable=True),
-            sa.Column("game_state", json_type, nullable=False, server_default="{}"),
+            sa.Column("state", sa.String(length=16), nullable=False, server_default="ACTIVE"),
+            sa.Column("prompt_text", sa.String(length=255), nullable=False),
+            sa.Column("solution_data", json_type, nullable=False),
+            sa.Column("reward_xp", sa.Integer(), nullable=False, server_default="50"),
+            sa.Column("reward_coins", sa.Integer(), nullable=False, server_default="25"),
+            sa.Column("winner_channel_id", sa.String(length=128), nullable=True),
+            sa.Column("winner_display_name", sa.String(length=255), nullable=True),
+            sa.Column("started_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.ForeignKeyConstraint(["creator_id"], ["creators.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["stream_session_id"], ["stream_sessions.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
         )
+        safe_idx("ix_mini_games_creator_state", "mini_game_sessions", ["creator_id", "state"])
+        safe_idx("ix_mini_games_session_state", "mini_game_sessions", ["stream_session_id", "state"])
         safe_idx("ix_mini_game_sessions_creator_id", "mini_game_sessions", ["creator_id"])
         safe_idx("ix_mini_game_sessions_stream_session_id", "mini_game_sessions", ["stream_session_id"])
         existing_tables.add("mini_game_sessions")

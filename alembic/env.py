@@ -20,8 +20,10 @@ target_metadata = Base.metadata
 
 
 def get_db_url() -> str:
+    from app.core.database_url import normalize_database_url
+
     settings = get_settings()
-    return settings.DATABASE_URL
+    return normalize_database_url(settings.DATABASE_URL, app_env=settings.APP_ENV)
 
 
 def run_migrations_offline() -> None:

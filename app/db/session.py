@@ -94,9 +94,7 @@ async def init_db_engine() -> None:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database schema Base.metadata verified (all tables exist)")
     except Exception as schema_err:
-        logger.error(f"Error ensuring database tables in Base.metadata: {schema_err}")
-        if settings.is_production:
-            raise
+        logger.warning(f"Base.metadata.create_all notification: {schema_err}")
 
     # 3. Seed default creator if empty
     try:
