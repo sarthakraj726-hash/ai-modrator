@@ -65,3 +65,4 @@ node_modules/
 .next/
 dashboard/.next/
 dashboard/node_modules/
+dashboard/.npm-cache/

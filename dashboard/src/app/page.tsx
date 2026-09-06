@@ -1,334 +1,83 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Activity, AlertTriangle, CheckCircle2, RefreshCw, ShieldCheck, Zap } from "lucide-react";
 import { Header } from "@/components/Header";
 import { StreamGrid } from "@/components/StreamGrid";
 import { QuotaCard } from "@/components/QuotaCard";
 import { ModerationQueue } from "@/components/ModerationQueue";
 import { IncidentPanel } from "@/components/IncidentPanel";
 import { ManualConnectModal } from "@/components/ManualConnectModal";
-import {
-  fetchAllDashboardData,
-  sendStreamControlAction,
-  sendManualConnect,
-  sendResetKeyCooldown,
-  sendResolveReview,
-  sendResolveIncident,
-  OverviewData,
-  StreamItem,
-  QuotaData,
-  KeyItem,
-  ReviewItem,
-  IncidentItem,
-  EndpointDiagnostic,
-} from "@/lib/api";
-import { Coins, Zap, Activity, RefreshCw, AlertTriangle, CheckCircle } from "lucide-react";
+import { fetchAllDashboardData, sendManualConnect, sendResetKeyCooldown, sendResolveIncident, sendResolveReview, sendStreamControlAction } from "@/lib/api";
+import type { DashboardFetchResult, EndpointDiagnostic } from "@/lib/api";
+
+type ConnectionState = "connecting" | "live" | "delayed" | "offline";
 
 export default function DashboardPage() {
-  const [overview, setOverview] = useState<OverviewData | null>(null);
-  const [streams, setStreams] = useState<StreamItem[]>([]);
-  const [quota, setQuota] = useState<QuotaData | null>(null);
-  const [keys, setKeys] = useState<KeyItem[]>([]);
-  const [reviews, setReviews] = useState<ReviewItem[]>([]);
-  const [incidents, setIncidents] = useState<IncidentItem[]>([]);
-  const [diagnostics, setDiagnostics] = useState<Record<string, EndpointDiagnostic>>({});
-  const [isConnectOpen, setIsConnectOpen] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState<string>("");
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [data, setData] = useState<DashboardFetchResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined);
+  const connectionRef = useRef<ConnectionState>("connecting");
 
-  const fetchDashboardData = useCallback(async () => {
-    setIsRefreshing(true);
-    try {
-      const signal = AbortSignal.timeout(8000);
-      const result = await fetchAllDashboardData(signal);
-
-      if (result.overview) setOverview(result.overview);
-      setStreams(result.streams);
-      if (result.quota) setQuota(result.quota);
-      setKeys(result.keys);
-      setReviews(result.reviews);
-      setIncidents(result.incidents);
-      setDiagnostics(result.diagnostics);
-
-      setLastRefreshed(new Date().toLocaleTimeString());
-    } catch (e) {
-      console.error("Dashboard fetch error:", e);
-    } finally {
-      setIsRefreshing(false);
-      setInitialLoading(false);
-    }
+  const refresh = useCallback(async () => {
+    setConnecting(true);
+    const result = await fetchAllDashboardData(AbortSignal.timeout(8_000));
+    setData(result);
+    setLastUpdated(new Date());
+    setLoading(false);
+    setConnecting(false);
   }, []);
+  refreshRef.current = refresh;
+
+  useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
-    fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 10000); // 10s fallback poll
-    return () => clearInterval(interval);
-  }, [fetchDashboardData]);
+    let source: EventSource | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+    let stopped = false;
+    const setRealtimeState = (state: ConnectionState) => { connectionRef.current = state; setConnection(state); };
+    const open = () => {
+      if (stopped) return;
+      setRealtimeState(attempt ? "delayed" : "connecting");
+      source = new EventSource("/api/v1/dashboard/events/stream");
+      source.onopen = () => { attempt = 0; setRealtimeState("live"); };
+      source.onmessage = () => { void refreshRef.current(); };
+      source.addEventListener("connected", () => { setRealtimeState("live"); });
+      source.onerror = () => {
+        source?.close();
+        setRealtimeState("delayed");
+        const delay = Math.min(30_000, 1_000 * 2 ** attempt++);
+        retryTimer = setTimeout(open, delay);
+      };
+    };
+    open();
+    // Polling is intentionally a safety net only. It is much slower than the SSE
+    // reconnect cycle and covers deployments where event streaming is disabled.
+    const fallback = setInterval(() => { if (connectionRef.current !== "live") void refreshRef.current(); }, 60_000);
+    return () => { stopped = true; source?.close(); if (retryTimer) clearTimeout(retryTimer); clearInterval(fallback); };
+  }, []);
 
-  // Stream Control Action
-  const handleStreamControl = async (streamId: string, action: string) => {
-    try {
-      const ok = await sendStreamControlAction(streamId, action);
-      if (ok) await fetchDashboardData();
-    } catch (e) {
-      console.error("Control action error:", e);
-    }
-  };
-
-  // Manual Connect
-  const handleManualConnect = async (urlOrId: string) => {
-    await sendManualConnect(urlOrId);
-    await fetchDashboardData();
-  };
-
-  // Reset Key Cooldown
-  const handleResetKey = async (index: number) => {
-    try {
-      const ok = await sendResetKeyCooldown(index);
-      if (ok) await fetchDashboardData();
-    } catch (e) {
-      console.error("Reset key error:", e);
-    }
-  };
-
-  // Resolve Review
-  const handleResolveReview = async (reviewId: string, action: string) => {
-    try {
-      const ok = await sendResolveReview(reviewId, action);
-      if (ok) await fetchDashboardData();
-    } catch (e) {
-      console.error("Resolve review error:", e);
-    }
-  };
-
-  // Resolve Incident
-  const handleResolveIncident = async (incidentId: string) => {
-    try {
-      const ok = await sendResolveIncident(incidentId);
-      if (ok) await fetchDashboardData();
-    } catch (e) {
-      console.error("Resolve incident error:", e);
-    }
-  };
-
-  // Health / Error overview badges
-  const hasAuthError = Object.values(diagnostics).some((d) => d.state === "unauthorized");
-  const has404Error = Object.values(diagnostics).some((d) => d.httpStatus === 404);
-  const hasConnectionError = Object.values(diagnostics).some((d) => d.state === "error");
-
-  return (
-    <div className="min-h-screen bg-[#08090f] text-slate-200">
-      <Header overview={overview} onOpenConnect={() => setIsConnectOpen(true)} />
-
-      <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Production Diagnostics Banner when API errors exist */}
-        {hasAuthError && (
-          <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between text-xs font-mono text-rose-300">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-400" />
-              <span>Authentication Error: Server-side ADMIN_SECRET rejected by backend (HTTP 401/403).</span>
-            </div>
-            <span className="text-[11px] text-rose-400/80">Check Railway ADMIN_SECRET</span>
-          </div>
-        )}
-
-        {has404Error && !hasAuthError && (
-          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs font-mono text-amber-300">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span>API Endpoint Notice: Backend returned HTTP 404. Ensure BACKEND_API_URL points to the base service URL.</span>
-            </div>
-            <span className="text-[11px] text-amber-400/80">Check BACKEND_API_URL</span>
-          </div>
-        )}
-
-        {hasConnectionError && !hasAuthError && !has404Error && (
-          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs font-mono text-amber-300">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span>Backend Connectivity Alert: One or more dashboard APIs unreachable (HTTP 502/503/504).</span>
-            </div>
-            <span className="text-[11px] text-amber-400/80">Check BACKEND_API_URL</span>
-          </div>
-        )}
-
-        {/* Top Operational Metrics Banner */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="cyber-panel p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-mono text-slate-400 uppercase">Active Streams</p>
-              <p className="text-xl font-bold font-mono text-slate-100">
-                {initialLoading ? (
-                  <span className="text-sm text-slate-500 animate-pulse">LOADING...</span>
-                ) : diagnostics.overview?.state === "error" || diagnostics.overview?.state === "unauthorized" ? (
-                  <span className="text-xs text-rose-400">UNAVAILABLE</span>
-                ) : (
-                  <>
-                    {overview?.active_streams ?? streams.length}{" "}
-                    <span className="text-xs text-slate-500 font-normal">/ 7 max</span>
-                  </>
-                )}
-              </p>
-            </div>
-            <div className="p-2.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
-              <Activity className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="cyber-panel p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-mono text-slate-400 uppercase">Quota Remaining</p>
-              <p className="text-xl font-bold font-mono text-cyan-400">
-                {initialLoading ? (
-                  <span className="text-sm text-slate-500 animate-pulse">LOADING...</span>
-                ) : diagnostics.quota?.state === "error" || diagnostics.quota?.state === "unauthorized" ? (
-                  <span className="text-xs text-rose-400">UNAVAILABLE</span>
-                ) : (
-                  <>
-                    {quota?.remaining ?? overview?.quota?.remaining ?? overview?.quota?.quota_remaining ?? "N/A"}{" "}
-                    <span className="text-xs text-slate-500 font-normal">pts</span>
-                  </>
-                )}
-              </p>
-            </div>
-            <div className="p-2.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-              <Zap className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="cyber-panel p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-mono text-slate-400 uppercase">HITL Pending</p>
-              <p className="text-xl font-bold font-mono text-purple-400">
-                {initialLoading ? (
-                  <span className="text-sm text-slate-500 animate-pulse">LOADING...</span>
-                ) : diagnostics.moderation?.state === "error" || diagnostics.moderation?.state === "unauthorized" ? (
-                  <span className="text-xs text-rose-400">UNAVAILABLE</span>
-                ) : (
-                  overview?.pending_moderation_reviews ?? reviews.length
-                )}
-              </p>
-            </div>
-            <div className="p-2.5 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
-              <span className="text-sm font-bold font-mono">🛡️</span>
-            </div>
-          </div>
-
-          <div className="cyber-panel p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-mono text-slate-400 uppercase">Ledger Integrity</p>
-              <p className="text-xl font-bold font-mono text-emerald-400">
-                {initialLoading ? (
-                  <span className="text-sm text-slate-500 animate-pulse">LOADING...</span>
-                ) : diagnostics.overview?.state === "error" || diagnostics.overview?.state === "unauthorized" ? (
-                  <span className="text-xs text-rose-400">UNAVAILABLE</span>
-                ) : overview?.ledger_balanced ? (
-                  "BALANCED"
-                ) : (
-                  "AUDIT REQ"
-                )}
-              </p>
-            </div>
-            <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <Coins className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-
-        {/* Structured Diagnostics Bar */}
-        <div className="cyber-panel p-3 flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-slate-500 font-semibold uppercase">API Diagnostics:</span>
-            {["overview", "streams", "quota", "keys", "moderation", "incidents"].map((key) => {
-              const diag = diagnostics[key];
-              const isOk = diag?.state === "success";
-              const isAuth = diag?.state === "unauthorized";
-              return (
-                <span
-                  key={key}
-                  className={`px-2 py-0.5 rounded border ${
-                    isOk
-                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                      : isAuth
-                      ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                      : "bg-amber-500/15 text-amber-300 border-amber-500/30"
-                  }`}
-                  title={diag?.error || "Endpoint responding normally"}
-                >
-                  {key}: {diag?.httpStatus ? `${diag.httpStatus}` : isOk ? "200" : "FAIL"}
-                </span>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-3 text-slate-500">
-            <span>Target: Railway Production • 6–7 Streams</span>
-            <button
-              onClick={fetchDashboardData}
-              className="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 transition-colors"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-cyan-400" : ""}`} />
-              <span>{lastRefreshed ? `Updated ${lastRefreshed}` : "Refreshing..."}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Section 1: Live Stream Grid */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-300 font-mono flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-              Active Live Stream Grid (Up to 7 Concurrent Sessions)
-            </h2>
-            {diagnostics.streams?.state === "success" && (
-              <span className="text-xs font-mono text-slate-500 flex items-center gap-1">
-                <CheckCircle className="w-3 h-3 text-emerald-400" />
-                {streams.length} sessions active
-              </span>
-            )}
-          </div>
-          <StreamGrid
-            streams={streams}
-            onControlAction={handleStreamControl}
-            isLoading={initialLoading}
-            error={diagnostics.streams?.error}
-          />
-        </section>
-
-        {/* Section 2: Quota & Incidents 2-Column Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <QuotaCard
-            quota={quota}
-            keys={keys}
-            onResetKey={handleResetKey}
-            isLoading={initialLoading}
-            error={diagnostics.quota?.error}
-          />
-          <IncidentPanel
-            incidents={incidents}
-            onResolve={handleResolveIncident}
-            isLoading={initialLoading}
-            error={diagnostics.incidents?.error}
-          />
-        </div>
-
-        {/* Section 3: Moderation & HITL Queue */}
-        <section className="space-y-3">
-          <ModerationQueue
-            reviews={reviews}
-            onResolve={handleResolveReview}
-            isLoading={initialLoading}
-            error={diagnostics.moderation?.error}
-          />
-        </section>
-      </main>
-
-      <ManualConnectModal
-        isOpen={isConnectOpen}
-        onClose={() => setIsConnectOpen(false)}
-        onConnect={handleManualConnect}
-      />
-    </div>
+  const mutate = async (operation: () => Promise<boolean | unknown>) => { await operation(); await refresh(); };
+  const diagnostics = data?.diagnostics ?? {};
+  const hasIssue = Object.values(diagnostics).some((item) => item.state === "error" || item.state === "unauthorized");
+  const overview = data?.overview;
+  const metric = (label: string, value: string | number, detail: string, icon: ReactNode) => (
+    <article className="cyber-panel p-4 sm:p-5"><div className="flex items-start justify-between"><div><p className="eyebrow">{label}</p><p className="mt-2 text-2xl font-semibold tracking-tight text-white">{loading ? "—" : value}</p><p className="mt-1 text-xs text-slate-400">{detail}</p></div><div className="rounded-xl bg-white/[.06] p-2.5 text-violet-300">{icon}</div></div></article>
   );
+
+  return <div className="min-h-screen"><Header overview={overview ?? null} onOpenConnect={() => setConnectOpen(true)} />
+    <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <section className="glass-panel rounded-2xl p-5 sm:p-7"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="eyebrow">Operations overview</p><h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Everything in view. Nothing in the way.</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Monitor live broadcasts, review safety decisions, and keep YouTube capacity healthy from one calm operational workspace.</p></div><div className="flex items-center gap-3"><span className="flex items-center gap-2 text-xs text-slate-400" aria-live="polite"><span className={`status-dot ${connection === "offline" ? "status-dot--danger" : connection === "delayed" ? "status-dot--warning" : ""}`} />{connection === "live" ? "Live updates" : connection === "delayed" ? "Reconnecting" : "Connecting"}</span><button onClick={() => void refresh()} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.05] px-3 py-2 text-sm text-slate-200 hover:bg-white/[.09]"><RefreshCw className={`h-4 w-4 ${connecting ? "animate-spin" : ""}`} />Refresh</button></div></div></section>
+      {hasIssue && <div role="status" className="flex items-start gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[.07] p-4 text-sm text-amber-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>Some operational data is temporarily unavailable. Your actions and data remain protected; retrying will happen automatically.</span></div>}
+      <section aria-label="System health" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{metric("System health", overview?.overall_status ?? "Checking", "Across connected services", <ShieldCheck className="h-5 w-5" />)}{metric("Active streams", overview?.active_streams ?? data?.streams.length ?? 0, "Currently monitored", <Activity className="h-5 w-5" />)}{metric("Needs review", overview?.pending_moderation_reviews ?? data?.reviews.length ?? 0, "Moderation decisions", <CheckCircle2 className="h-5 w-5" />)}{metric("Quota remaining", overview?.quota.remaining ?? data?.quota?.remaining ?? "—", "YouTube API units today", <Zap className="h-5 w-5" />)}</section>
+      <section className="space-y-3"><div className="flex items-end justify-between"><div><p className="eyebrow">Live streams</p><h2 className="mt-1 text-lg font-semibold text-white">Broadcast workspace</h2></div><span className="text-xs text-slate-500">{lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Waiting for data"}</span></div><StreamGrid streams={data?.streams ?? []} onControlAction={(id, action) => void mutate(() => sendStreamControlAction(id, action))} isLoading={loading} error={diagnostics.streams?.error} /></section>
+      <section className="grid gap-6 lg:grid-cols-2"><QuotaCard quota={data?.quota ?? null} keys={data?.keys ?? []} onResetKey={(index) => void mutate(() => sendResetKeyCooldown(index))} isLoading={loading} error={diagnostics.quota?.error} /><IncidentPanel incidents={data?.incidents ?? []} onResolve={(id) => void mutate(() => sendResolveIncident(id))} isLoading={loading} error={diagnostics.incidents?.error} /></section>
+      <ModerationQueue reviews={data?.reviews ?? []} onResolve={(id, action) => void mutate(() => sendResolveReview(id, action))} isLoading={loading} error={diagnostics.moderation?.error} />
+      <details className="cyber-panel p-4 text-sm text-slate-400"><summary className="cursor-pointer font-medium text-slate-200">System diagnostics</summary><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(diagnostics).map(([name, item]: [string, EndpointDiagnostic]) => <div key={name} className="rounded-lg bg-black/15 px-3 py-2"><span className="capitalize text-slate-200">{name}</span><span className="ml-2 text-xs">{item.httpStatus ? `HTTP ${item.httpStatus}` : item.state}</span></div>)}</div></details>
+    </main><ManualConnectModal isOpen={connectOpen} onClose={() => setConnectOpen(false)} onConnect={async (value) => { await sendManualConnect(value); await refresh(); }} /></div>;
 }

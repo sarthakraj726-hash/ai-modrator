@@ -1,81 +1,41 @@
 "use client";
 
 import React from "react";
-import { Activity, ShieldAlert, Cpu, Server, Database, Radio, Sparkles } from "lucide-react";
+import { Plus, Radio } from "lucide-react";
+import type { OverviewData } from "@/lib/api";
 
 interface HeaderProps {
-  overview: any;
+  overview: OverviewData | null;
   onOpenConnect: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ overview, onOpenConnect }) => {
-  const subsystems = overview?.subsystems || {};
-
-  const getBadgeColor = (status?: string) => {
-    switch (status) {
-      case "HEALTHY":
-        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-      case "DEGRADED":
-        return "bg-amber-500/10 text-amber-400 border-amber-500/30";
-      case "CRITICAL":
-      case "UNHEALTHY":
-        return "bg-rose-500/10 text-rose-400 border-rose-500/30";
-      default:
-        return "bg-slate-800 text-slate-400 border-slate-700";
-    }
-  };
+  const status = overview?.overall_status?.toUpperCase() ?? "CONNECTING";
+  const isHealthy = status === "HEALTHY";
 
   return (
-    <header className="border-b border-surface-border bg-surface/80 backdrop-blur-md sticky top-0 z-40 px-6 py-4">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        {/* Brand & Subtitle */}
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0c0d12]/80 px-4 py-3 backdrop-blur-xl sm:px-6">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-purple-600 to-cyan-500 flex items-center justify-center shadow-glow-purple">
-            <Radio className="w-5 h-5 text-white animate-pulse" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-400 text-slate-950 shadow-lg shadow-violet-500/20">
+            <Radio className="h-5 w-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-purple-400 via-cyan-300 to-emerald-400 bg-clip-text text-transparent">
-                GODDESS AI
-              </h1>
-              <span className="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono">
-                CONTROL CENTER
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Honney AI Co-Host • 7-Stream Multi-Channel Operations Engine
-            </p>
+            <h1 className="text-base font-semibold tracking-tight text-white">Goddess AI</h1>
+            <p className="hidden text-xs text-slate-400 sm:block">Broadcast operations</p>
           </div>
         </div>
 
-        {/* Subsystem Health Pills */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className={`px-2.5 py-1 rounded-md text-xs font-mono border flex items-center gap-1.5 ${getBadgeColor(subsystems?.database?.status)}`}>
-            <Database className="w-3.5 h-3.5" />
-            <span>DB</span>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[.04] px-3 py-2 text-xs text-slate-300 sm:flex" aria-live="polite">
+            <span className={`status-dot ${isHealthy ? "" : "status-dot--warning"}`} />
+            {status.replaceAll("_", " ")}
           </div>
-          <div className={`px-2.5 py-1 rounded-md text-xs font-mono border flex items-center gap-1.5 ${getBadgeColor(subsystems?.redis?.status)}`}>
-            <Server className="w-3.5 h-3.5" />
-            <span>REDIS</span>
-          </div>
-          <div className={`px-2.5 py-1 rounded-md text-xs font-mono border flex items-center gap-1.5 ${getBadgeColor(subsystems?.youtube?.status)}`}>
-            <Activity className="w-3.5 h-3.5" />
-            <span>YOUTUBE</span>
-          </div>
-          <div className={`px-2.5 py-1 rounded-md text-xs font-mono border flex items-center gap-1.5 ${getBadgeColor(subsystems?.workers?.status)}`}>
-            <Cpu className="w-3.5 h-3.5" />
-            <span>WORKERS</span>
-          </div>
-          <div className="px-2.5 py-1 rounded-md text-xs font-mono border border-purple-500/30 bg-purple-500/10 text-purple-300 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-            <span>HONNEY AI</span>
-          </div>
-
           <button
             onClick={onOpenConnect}
-            className="ml-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-xs font-semibold shadow-glow-purple transition-all active:scale-95 flex items-center gap-1.5"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-violet-400 px-3 py-2 text-sm font-semibold text-slate-950 transition-colors hover:bg-violet-300"
           >
-            <span>+ CONNECT STREAM</span>
+            <Plus className="h-4 w-4" /><span className="hidden sm:inline">Connect stream</span><span className="sm:hidden">Connect</span>
           </button>
         </div>
       </div>

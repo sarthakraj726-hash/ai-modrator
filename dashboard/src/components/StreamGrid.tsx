@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Play, Square, RotateCcw, MessageSquare, Clock, Tv } from "lucide-react";
+import { Square, RotateCcw, MessageSquare, Clock, Tv } from "lucide-react";
 import { StreamItem } from "@/lib/api";
 
 interface StreamGridProps {
@@ -54,8 +54,8 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
     return (
       <div className="cyber-panel p-6 text-center border border-rose-500/40 bg-rose-500/5">
         <Tv className="w-8 h-8 mx-auto mb-2 text-rose-400" />
-        <p className="text-rose-300 text-sm font-semibold">Streams Telemetry Unavailable</p>
-        <p className="text-xs text-slate-400 mt-1 font-mono">{error}</p>
+        <p className="text-rose-300 text-sm font-semibold">Stream data is unavailable</p>
+        <p className="text-xs text-slate-400 mt-1">Please try again in a moment.</p>
       </div>
     );
   }
@@ -64,7 +64,7 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
     return (
       <div className="cyber-panel p-8 text-center border-dashed border-slate-800">
         <Tv className="w-10 h-10 mx-auto mb-3 text-slate-600 animate-pulse" />
-        <p className="text-slate-400 text-sm font-medium">Connecting to stream worker telemetry...</p>
+        <p className="text-slate-400 text-sm font-medium">Loading your broadcasts…</p>
       </div>
     );
   }
@@ -73,9 +73,9 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
     return (
       <div className="cyber-panel p-8 text-center border-dashed border-slate-800">
         <Tv className="w-10 h-10 mx-auto mb-3 text-slate-600" />
-        <p className="text-slate-400 text-sm font-medium">No live streams active.</p>
+        <p className="text-slate-300 text-sm font-medium">No broadcasts connected yet.</p>
         <p className="text-xs text-slate-500 mt-1">
-          Click &ldquo;+ CONNECT STREAM&rdquo; in the top header to attach a YouTube Live broadcast.
+          Connect a YouTube Live broadcast to begin monitoring.
         </p>
       </div>
     );
@@ -86,7 +86,7 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
       {streams.map((s) => (
         <div
           key={s.session_id}
-          className="cyber-panel p-4 hover:border-purple-500/40 transition-all group flex flex-col justify-between"
+          className="cyber-panel p-5 transition-all group flex flex-col justify-between"
         >
           <div>
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -96,10 +96,10 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
               {getStatusBadge(s.status)}
             </div>
 
-            <div className="space-y-1.5 text-xs text-slate-400 mb-4 font-mono">
+            <div className="space-y-2 text-xs text-slate-400 mb-5">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Video ID:</span>
-                <span className="text-cyan-400">{s.youtube_video_id}</span>
+                <span className="text-slate-500">Worker health</span>
+                <span className={s.is_worker_alive ? "text-emerald-300" : "text-amber-300"}>{s.is_worker_alive ? "Connected" : "Awaiting worker"}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Duration:</span>
@@ -109,8 +109,8 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Session ID:</span>
-                <span className="text-slate-400 truncate max-w-[120px]">{s.session_id}</span>
+                <span className="text-slate-500">Messages processed</span>
+                <span className="text-slate-200">{s.messages_processed ?? 0}</span>
               </div>
             </div>
           </div>
@@ -119,19 +119,19 @@ export const StreamGrid: React.FC<StreamGridProps> = ({ streams, onControlAction
           <div className="pt-3 border-t border-surface-border/80 flex items-center justify-between gap-2">
             <button
               onClick={() => onControlAction(s.session_id, "restart")}
-              className="flex-1 px-2.5 py-1.5 rounded bg-surface-raised hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-mono transition-colors flex items-center justify-center gap-1.5 border border-surface-border"
+              className="flex-1 px-3 py-2 rounded-xl bg-white/[.06] hover:bg-white/[.10] text-slate-200 text-sm transition-colors flex items-center justify-center gap-1.5 border border-white/10"
               title="Restart stream worker"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>RESTART</span>
+              <span>Restart worker</span>
             </button>
             <button
-              onClick={() => onControlAction(s.session_id, "disconnect")}
-              className="px-3 py-1.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-mono transition-colors flex items-center justify-center gap-1"
+              onClick={() => { if (window.confirm(`Disconnect ${s.channel_name}? This stops its live chat worker.`)) onControlAction(s.session_id, "disconnect"); }}
+              className="px-3 py-2 rounded-xl bg-rose-400/10 hover:bg-rose-400/20 text-rose-200 border border-rose-300/20 text-sm transition-colors flex items-center justify-center gap-1"
               title="Disconnect live chat worker"
             >
               <Square className="w-3 h-3" />
-              <span>STOP</span>
+              <span>Disconnect</span>
             </button>
           </div>
         </div>
