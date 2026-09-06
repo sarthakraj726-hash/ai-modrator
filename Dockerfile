@@ -37,15 +37,16 @@ COPY --chown=appuser:appgroup alembic/ /app/alembic/
 COPY --chown=appuser:appgroup alembic.ini /app/
 COPY --chown=appuser:appgroup pyproject.toml /app/
 
+
 # Switch to non-root user
 USER appuser
 
 # Expose default port
 EXPOSE 8000
 
-# Health check using python urllib
+# Health check using python urllib with explicit 3s socket timeout and trimmed port
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://localhost:' + str(os.environ.get('PORT', 8000)) + '/health/live')" || exit 1
+    CMD python -c "import os, urllib.request; port = str(os.environ.get('PORT', '8000')).strip(); urllib.request.urlopen('http://127.0.0.1:' + port + '/health/live', timeout=3)" || exit 1
 
 # Start command supporting Railway dynamic $PORT
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

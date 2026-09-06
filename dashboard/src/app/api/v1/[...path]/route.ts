@@ -40,6 +40,9 @@ function getAdminSecret(): string {
   if (secret && secret.trim()) {
     return secret.trim();
   }
+  if (process.env.NODE_ENV !== "production") {
+    return "dev-admin-secret-replace-in-production";
+  }
   return "";
 }
 
@@ -82,8 +85,10 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
     }
   }
 
+  const isSSE = subpath.includes("events/stream") || request.headers.get("accept")?.includes("text/event-stream");
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutId = isSSE ? undefined : setTimeout(() => controller.abort(), 12000);
+  request.signal.addEventListener("abort", () => controller.abort());
 
   try {
     const backendRes = await fetch(targetUrl, {
@@ -94,7 +99,7 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
       cache: "no-store",
     });
 
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
     const duration = Date.now() - start;
 
     // Diagnostic logging without leaking secrets or tokens
@@ -112,13 +117,22 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
       }
     });
 
+    // For Server-Sent Events, stream the response directly without buffering
+    const contentType = backendRes.headers.get("content-type") || "";
+    if (contentType.includes("text/event-stream")) {
+      return new NextResponse(backendRes.body, {
+        status: backendRes.status,
+        headers: resHeaders,
+      });
+    }
+
     const resBody = await backendRes.arrayBuffer();
     return new NextResponse(resBody, {
       status: backendRes.status,
       headers: resHeaders,
     });
   } catch (err: unknown) {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
     const duration = Date.now() - start;
     const isTimeout = err instanceof Error && err.name === "AbortError";
     const errorMessage = isTimeout

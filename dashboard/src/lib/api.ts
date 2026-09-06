@@ -79,6 +79,80 @@ export interface IncidentItem {
   resolved_at: string | null;
 }
 
+export interface WorkerSessionItem {
+  session_id: string;
+  creator_id: string;
+  video_id: string;
+  live_chat_id?: string;
+  state: string;
+  messages_processed: number;
+  messages_per_minute?: number;
+  consecutive_errors: number;
+  last_error?: string | null;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  last_heartbeat_ago_seconds: number;
+  is_stale: boolean;
+}
+
+export interface WorkersData {
+  status: string;
+  active_workers: number;
+  total_registered_workers: number;
+  stale_workers: number;
+  error_workers: number;
+  total_messages_per_minute: number;
+  max_concurrency: number;
+  workers: WorkerSessionItem[];
+  message: string;
+}
+
+export interface CohostData {
+  persona_name: string;
+  persona_type: string;
+  style: string;
+  verbosity: string;
+  cohost_mode: string;
+  monthly_token_budget: number;
+  max_reply_tokens: number;
+  max_reply_chars: number;
+  cooldown_seconds: number;
+  supported_scenarios: string[];
+  message: string;
+}
+
+export interface IntegrityViolationItem {
+  category: string;
+  severity: string;
+  entity_id?: string | null;
+  details: string;
+  context?: Record<string, unknown>;
+}
+
+export interface IntegrityAuditData {
+  timestamp: string;
+  is_valid: boolean;
+  violations: IntegrityViolationItem[];
+  stats: {
+    ledger?: {
+      total_transactions_audited?: number;
+      imbalanced_transactions?: number;
+      total_debits_global?: number;
+      total_credits_global?: number;
+    };
+    balances?: {
+      total_accounts_audited?: number;
+      negative_accounts_count?: number;
+    };
+    store?: {
+      orphaned_inventory_count?: number;
+    };
+    sessions?: {
+      stale_live_sessions_count?: number;
+    };
+  };
+}
+
 export interface OverviewData {
   overall_status: string;
   active_streams: number;
@@ -110,6 +184,8 @@ export interface DashboardFetchResult {
   keys: KeyItem[];
   reviews: ReviewItem[];
   incidents: IncidentItem[];
+  workers: WorkersData | null;
+  cohost: CohostData | null;
   diagnostics: Record<string, EndpointDiagnostic>;
 }
 
@@ -192,13 +268,15 @@ async function safeFetchJson<T>(url: string, signal?: AbortSignal): Promise<{ da
 }
 
 export async function fetchAllDashboardData(signal?: AbortSignal): Promise<DashboardFetchResult> {
-  const [ovRes, stRes, qRes, kRes, mRes, iRes] = await Promise.all([
+  const [ovRes, stRes, qRes, kRes, mRes, iRes, wRes, cRes] = await Promise.all([
     safeFetchJson<OverviewData>("/api/v1/dashboard/overview", signal),
     safeFetchJson<unknown>("/api/v1/dashboard/streams", signal),
     safeFetchJson<QuotaData>("/api/v1/dashboard/quota", signal),
     safeFetchJson<KeyItem[]>("/api/v1/dashboard/youtube-keys", signal),
     safeFetchJson<unknown>("/api/v1/dashboard/moderation?status_filter=PENDING", signal),
     safeFetchJson<IncidentItem[]>("/api/v1/dashboard/incidents", signal),
+    safeFetchJson<WorkersData>("/api/v1/dashboard/workers", signal),
+    safeFetchJson<CohostData>("/api/v1/dashboard/cohost", signal),
   ]);
 
   // Normalize streams: ensure session_id and duration_seconds exist
@@ -255,6 +333,8 @@ export async function fetchAllDashboardData(signal?: AbortSignal): Promise<Dashb
     keys: Array.isArray(kRes.data) ? kRes.data : [],
     reviews: normalizedReviews,
     incidents: Array.isArray(iRes.data) ? iRes.data : [],
+    workers: wRes.data,
+    cohost: cRes.data,
     diagnostics: {
       overview: ovRes.diagnostic,
       streams: stRes.diagnostic,
@@ -262,6 +342,8 @@ export async function fetchAllDashboardData(signal?: AbortSignal): Promise<Dashb
       keys: kRes.diagnostic,
       moderation: mRes.diagnostic,
       incidents: iRes.diagnostic,
+      workers: wRes.diagnostic,
+      cohost: cRes.diagnostic,
     },
   };
 }
@@ -324,3 +406,30 @@ export async function sendResolveIncident(incidentId: string): Promise<boolean> 
   });
   return res.ok;
 }
+
+export async function sendRunIntegrityAudit(): Promise<IntegrityAuditData> {
+  const res = await fetch("/api/v1/dashboard/integrity/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`Audit run failed (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function sendTestRemark(
+  eventType: string,
+  context?: Record<string, unknown>
+): Promise<{ remark: string; event_type: string }> {
+  const res = await fetch("/api/v1/dashboard/cohost/test-remark", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_type: eventType, context: context || {} }),
+  });
+  if (!res.ok) {
+    throw new Error(`Test remark failed (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+

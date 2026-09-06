@@ -215,16 +215,56 @@ class HealthMonitorService:
             return {"status": SubsystemStatus.DEGRADED, "error": str(e)}
 
     def check_workers(self) -> dict[str, Any]:
-        """Evaluate active stream workers."""
+        """Evaluate active stream workers, heartbeats, and throughput."""
         try:
-            active_count = len(self.worker_manager._sessions)
+            sessions = list(self.worker_manager._sessions.values())
+            running_sessions = [
+                s
+                for s in sessions
+                if getattr(s, "state", None) in ("RUNNING", "ACTIVE")
+                or getattr(getattr(s, "state", None), "value", "") in ("RUNNING", "ACTIVE")
+            ]
+            error_sessions = [
+                s
+                for s in sessions
+                if getattr(s, "state", None) in ("ERROR", "FAILED")
+                or getattr(getattr(s, "state", None), "value", "") in ("ERROR", "FAILED")
+            ]
+
+            stale_count = 0
+            total_msg_per_min = 0
+            worker_details = []
+
+            for s in sessions:
+                status_dict = s.get_status() if hasattr(s, "get_status") else {}
+                hb_ago = status_dict.get("last_heartbeat_ago_seconds", 0.0)
+                is_running = status_dict.get("state") in ("RUNNING", "ACTIVE")
+                if is_running and hb_ago > 60.0:
+                    stale_count += 1
+                total_msg_per_min += status_dict.get("messages_per_minute", 0)
+                worker_details.append(status_dict)
+
+            active_count = len(running_sessions)
+            status = SubsystemStatus.HEALTHY
+            if len(error_sessions) > 0 or stale_count > 0:
+                status = SubsystemStatus.DEGRADED
+            if active_count >= 10:
+                status = SubsystemStatus.DEGRADED
+
+            msg = f"{active_count} active workers ({total_msg_per_min} msg/min)"
+            if stale_count > 0:
+                msg += f", {stale_count} stale"
+
             return {
-                "status": SubsystemStatus.HEALTHY
-                if active_count < 10
-                else SubsystemStatus.DEGRADED,
+                "status": status,
                 "active_workers": active_count,
+                "total_registered_workers": len(sessions),
+                "stale_workers": stale_count,
+                "error_workers": len(error_sessions),
+                "total_messages_per_minute": total_msg_per_min,
                 "max_concurrency": 7,
-                "message": f"{active_count} stream workers active",
+                "workers": worker_details,
+                "message": msg,
             }
         except Exception as e:
             return {"status": SubsystemStatus.DEGRADED, "error": str(e)}

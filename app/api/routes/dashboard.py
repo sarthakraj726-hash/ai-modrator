@@ -119,6 +119,13 @@ class FeatureFlagUpdateRequest(BaseModel):
     reason: str | None = None
 
 
+class TestRemarkRequest(BaseModel):
+    creator_id: str | None = None
+    event_type: str = Field("stream_started", description="stream_started, hype, greeting, farewell, moderation_warning")
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+
 # --- 1. System Overview ---
 @router.get("/overview", summary="Control Center Overview")
 async def get_dashboard_overview(db: DBSessionDep, admin: AdminUserDep) -> dict[str, Any]:
@@ -1222,7 +1229,113 @@ async def stream_dashboard_events(
     )
 
 
-# --- 12. Direct /api/v1 Aliases (without /dashboard prefix) ---
+# --- 12. Supervised Workers Diagnostic ---
+@router.get("/workers", summary="Supervised Stream Workers Telemetry")
+async def get_worker_telemetry(admin: AdminUserDep) -> dict[str, Any]:
+    worker_mgr = get_worker_manager()
+    health_svc = HealthMonitorService(worker_manager=worker_mgr)
+    return health_svc.check_workers()
+
+
+# --- 13. Database Integrity On-Demand Audit ---
+@router.post("/integrity/run", summary="Run On-Demand Database & Ledger Audit")
+async def run_integrity_audit(db: DBSessionDep, admin: AdminUserDep) -> dict[str, Any]:
+    integrity_svc = IntegrityCheckService(db)
+    report = await integrity_svc.run_full_audit()
+
+    audit_repo = AuditRepository(db)
+    await audit_repo.log_event(
+        event_type="system.integrity_audit",
+        actor_type="ADMIN",
+        actor_id=admin.user_id,
+        payload={
+            "is_valid": report.is_valid,
+            "violations_count": len(report.violations),
+            "stats": report.stats,
+        },
+    )
+
+    return {
+        "timestamp": report.timestamp.isoformat(),
+        "is_valid": report.is_valid,
+        "violations": [
+            {
+                "category": v.category,
+                "severity": v.severity,
+                "entity_id": v.entity_id,
+                "details": v.details,
+                "context": v.context,
+            }
+            for v in report.violations
+        ],
+        "stats": report.stats,
+    }
+
+
+# --- 14. Honney AI Co-Host Telemetry & Testing ---
+@router.get("/cohost", summary="Honney AI Co-Host Telemetry & Configuration")
+async def get_cohost_telemetry(db: DBSessionDep, admin: AdminUserDep) -> dict[str, Any]:
+    from app.core.config import get_settings
+    from app.persona.models import PersonaProfile, PersonaType
+
+    settings = get_settings()
+    profile = PersonaProfile(creator_id="default-creator", persona_type=PersonaType.CO_HOST)
+
+    return {
+        "persona_name": "Honney AI",
+        "persona_type": profile.persona_type.value,
+        "style": profile.style.value,
+        "verbosity": profile.verbosity.value,
+        "cohost_mode": "ACTIVE",
+        "monthly_token_budget": settings.AI_MONTHLY_TOKEN_BUDGET,
+        "max_reply_tokens": settings.HONNEY_MAX_REPLY_TOKENS,
+        "max_reply_chars": settings.HONNEY_MAX_REPLY_CHARS,
+        "cooldown_seconds": 45,
+        "supported_scenarios": [
+            "stream_started",
+            "hype",
+            "greeting",
+            "farewell",
+            "moderation_warning",
+        ],
+        "message": "Honney AI Co-Host operational with fail-safe boundaries.",
+    }
+
+
+@router.post("/cohost/test-remark", summary="Generate Test Co-Host Remark")
+async def test_cohost_remark(req: TestRemarkRequest, admin: AdminUserDep) -> dict[str, Any]:
+    from app.persona.engine import get_persona_engine
+    from app.persona.models import PersonaProfile, PersonaType
+
+    engine = get_persona_engine()
+    profile = PersonaProfile(creator_id=req.creator_id or "default-creator", persona_type=PersonaType.CO_HOST)
+
+    event_clean = (req.event_type or "stream_started").lower()
+    if "greet" in event_clean:
+        viewer_name = req.context.get("viewer_name", "Viewer")
+        remark = engine.generate_greeting(profile, viewer_name)
+    elif "farewell" in event_clean or "bye" in event_clean:
+        stream_title = req.context.get("stream_title", "Live Stream")
+        remark = engine.generate_farewell(profile, stream_title)
+    elif "mod" in event_clean or "warn" in event_clean:
+        reason = req.context.get("reason", "Keeping chat friendly")
+        remark = engine.format_moderation_notice(profile, "TIMEOUT", reason)
+    else:
+        remark = engine.format_cohost_remark(profile, req.event_type)
+
+    if not remark:
+        remark = "✨ Honney is here with the stream vibe! Let's get it! ✨"
+
+    return {
+        "event_type": req.event_type,
+        "remark": remark,
+        "creator_id": profile.creator_id,
+        "persona": "Honney AI",
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
+# --- 15. Direct /api/v1 Aliases (without /dashboard prefix) ---
 alias_router = APIRouter(tags=["Developer Control Center Aliases"])
 
 alias_router.add_api_route(
@@ -1252,5 +1365,17 @@ alias_router.add_api_route(
 )
 alias_router.add_api_route(
     "/streams/test-message", send_test_message, methods=["POST"], summary="Test Live Chat Message Alias"
+)
+alias_router.add_api_route(
+    "/workers", get_worker_telemetry, methods=["GET"], summary="Workers Telemetry Alias"
+)
+alias_router.add_api_route(
+    "/integrity/run", run_integrity_audit, methods=["POST"], summary="Run Integrity Audit Alias"
+)
+alias_router.add_api_route(
+    "/cohost", get_cohost_telemetry, methods=["GET"], summary="Cohost Telemetry Alias"
+)
+alias_router.add_api_route(
+    "/cohost/test-remark", test_cohost_remark, methods=["POST"], summary="Test Cohost Remark Alias"
 )
 

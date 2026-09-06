@@ -136,6 +136,32 @@ class IncidentService:
                 },
             )
             await self.event_bus.publish(event)
+
+            # Dispatch to Discord Operations Service (non-blocking / error-shielded)
+            try:
+                from app.discord.operations import DiscordAlertPriority, DiscordOperationsService
+
+                discord_svc = DiscordOperationsService()
+                discord_priority = (
+                    DiscordAlertPriority.CRITICAL
+                    if incident.severity.upper() == "CRITICAL"
+                    else DiscordAlertPriority.WARNING
+                )
+                asyncio.create_task(
+                    discord_svc.send_critical_incident_alert(
+                        incident_id=incident.incident_id,
+                        service=incident.service,
+                        summary=incident.summary,
+                        severity=discord_priority,
+                        affected_creators=[creator_id] if creator_id else None,
+                        affected_streams=[stream_session_id] if stream_session_id else None,
+                        likely_cause=root_cause,
+                        recommended_action=action,
+                    )
+                )
+            except Exception as disc_err:
+                logger.debug(f"Discord alert dispatch skipped or failed: {disc_err}")
+
             return incident, True
 
     async def update_status(
@@ -191,6 +217,21 @@ class IncidentService:
                 },
             )
             await self.event_bus.publish(event)
+
+            # Dispatch recovery alert to Discord operations
+            try:
+                from app.discord.operations import DiscordOperationsService
+
+                discord_svc = DiscordOperationsService()
+                asyncio.create_task(
+                    discord_svc.send_recovery_notification(
+                        incident_id=incident.incident_id,
+                        service=incident.service,
+                        resolution=resolution or action or f"Incident transitioned to {target_status}",
+                    )
+                )
+            except Exception as disc_err:
+                logger.debug(f"Discord recovery dispatch skipped or failed: {disc_err}")
 
         return incident
 

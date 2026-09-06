@@ -41,7 +41,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await init_db_engine()
         logger.info("Database engine initialized successfully")
     except Exception as e:
-        logger.error(f"Database initialization warning: {e}", exc_info=True)
+        logger.error(f"Database initialization failure: {e}", exc_info=True)
+        if settings.is_production:
+            raise
 
     # 2. Initialize Redis Connection
     try:

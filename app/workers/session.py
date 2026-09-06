@@ -87,6 +87,7 @@ class StreamWorkerSession:
         self.messages_processed: int = 0
         self.consecutive_errors: int = 0
         self.last_error: str | None = None
+        self._message_timestamps: list[float] = []
 
         self._task: asyncio.Task[None] | None = None
         self._join_task: asyncio.Task[None] | None = None
@@ -238,6 +239,12 @@ class StreamWorkerSession:
                         self.last_heartbeat = time.time()
                         for msg in batch:
                             self.messages_processed += 1
+                            msg_now = time.time()
+                            self._message_timestamps.append(msg_now)
+                            if len(self._message_timestamps) > 500:
+                                cutoff = msg_now - 60.0
+                                self._message_timestamps = [t for t in self._message_timestamps if t >= cutoff]
+
                             # Attach explicit stream routing identity
                             msg.creator_id = self.creator_id
                             msg.stream_session_id = self.session_id
@@ -292,6 +299,12 @@ class StreamWorkerSession:
                         logger.error(
                             f"Stream session {self.session_id} exceeded error threshold ({self.error_threshold}). Entering ERROR state."
                         )
+                        asyncio.create_task(
+                            self._report_worker_failure_incident(
+                                summary=f"Stream session {self.session_id} exceeded error threshold: {exc}",
+                                root_cause=str(exc),
+                            )
+                        )
                         break
 
                     # Exponential backoff with jitter before reconnect
@@ -323,6 +336,12 @@ class StreamWorkerSession:
                     stream_session_id=self.session_id,
                     correlation_id=f"stream-{self.session_id[:8]}",
                     payload={"fatal_error": str(fatal_exc)},
+                )
+            )
+            asyncio.create_task(
+                self._report_worker_failure_incident(
+                    summary=f"Fatal unhandled exception in stream session {self.session_id}: {fatal_exc}",
+                    root_cause=str(fatal_exc),
                 )
             )
         finally:
@@ -369,6 +388,12 @@ class StreamWorkerSession:
 
     def get_status(self) -> dict[str, Any]:
         """Return runtime diagnostic snapshot for observability."""
+        now = time.time()
+        cutoff = now - 60.0
+        msgs_last_min = len([t for t in self._message_timestamps if t >= cutoff])
+        heartbeat_ago = round(now - self.last_heartbeat, 2)
+        is_stale = (self.state in (WorkerState.RUNNING, WorkerState.ACTIVE)) and (heartbeat_ago > 60.0)
+
         return {
             "session_id": self.session_id,
             "creator_id": self.creator_id,
@@ -376,9 +401,33 @@ class StreamWorkerSession:
             "live_chat_id": self.live_chat_id,
             "state": self.state.value,
             "messages_processed": self.messages_processed,
+            "messages_per_minute": msgs_last_min,
             "consecutive_errors": self.consecutive_errors,
             "last_error": self.last_error,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "stopped_at": self.stopped_at.isoformat() if self.stopped_at else None,
-            "last_heartbeat_ago_seconds": round(time.time() - self.last_heartbeat, 2),
+            "last_heartbeat_ago_seconds": heartbeat_ago,
+            "is_stale": is_stale,
         }
+
+    async def _report_worker_failure_incident(self, summary: str, root_cause: str) -> None:
+        """Asynchronously report stream worker failure to IncidentService."""
+        try:
+            from app.db.session import async_session_maker
+            from app.services.incidents import IncidentService
+
+            if async_session_maker:
+                async with async_session_maker() as session:
+                    incident_svc = IncidentService(session)
+                    await incident_svc.report_incident(
+                        severity="ERROR",
+                        service="STREAM_WORKER",
+                        summary=summary,
+                        creator_id=self.creator_id,
+                        stream_session_id=self.session_id,
+                        root_cause=root_cause,
+                        action="Inspect YouTube live chat transport and worker logs. Reconnect stream if necessary.",
+                    )
+                    await session.commit()
+        except Exception as report_err:
+            logger.debug(f"Incident reporting from stream worker failure skipped/failed: {report_err}")
