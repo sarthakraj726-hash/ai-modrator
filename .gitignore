@@ -39,6 +39,7 @@ env/
 htmlcov/
 .tox/
 .nox/
+.pydeps/
 coverage.xml
 *.cover
 *.py,cover
@@ -65,3 +66,4 @@ node_modules/
 .next/
 dashboard/.next/
 dashboard/node_modules/
+dashboard/.npm-cache/

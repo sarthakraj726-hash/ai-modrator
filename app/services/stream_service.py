@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cache.redis import get_redis_client
 from app.core.config import get_settings
 from app.core.exceptions import (
-    AppException,
     DuplicateStreamConnectionError,
     EntityNotFoundError,
     InvalidArgumentError,

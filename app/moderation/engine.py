@@ -155,11 +155,12 @@ class HonneyModerationEngine(ModerationEngine):
                 creator_id, stream_session_id, user_id=author_id, tokens_used=50
             )
         except Exception as e:
-            logger.error(f"AI moderation classification failed: {e}. Defaulting to safe ALLOW.")
+            logger.error("AI moderation classification failed; routing ambiguous content to review: %s", e)
             return ModerationDecision(
-                action=ModerationAction.ALLOW,
-                reason="AI classification error; safe fallback applied",
+                action=ModerationAction.FLAG_FOR_REVIEW,
+                reason="AI classification unavailable; requires human review",
                 confidence_score=0.5,
+                requires_human_review=True,
             )
 
         # 6. Layer 4 & 5: Evaluate 2D Policy Engine Matrix

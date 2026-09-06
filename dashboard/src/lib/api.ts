@@ -113,6 +113,20 @@ export interface DashboardFetchResult {
   diagnostics: Record<string, EndpointDiagnostic>;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null;
+}
+
+function asString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 async function safeFetchJson<T>(url: string, signal?: AbortSignal): Promise<{ data: T | null; diagnostic: EndpointDiagnostic }> {
   const name = url.split("?")[0].replace("/api/v1/dashboard/", "");
   try {
@@ -180,56 +194,52 @@ async function safeFetchJson<T>(url: string, signal?: AbortSignal): Promise<{ da
 export async function fetchAllDashboardData(signal?: AbortSignal): Promise<DashboardFetchResult> {
   const [ovRes, stRes, qRes, kRes, mRes, iRes] = await Promise.all([
     safeFetchJson<OverviewData>("/api/v1/dashboard/overview", signal),
-    safeFetchJson<any[]>("/api/v1/dashboard/streams", signal),
+    safeFetchJson<unknown>("/api/v1/dashboard/streams", signal),
     safeFetchJson<QuotaData>("/api/v1/dashboard/quota", signal),
     safeFetchJson<KeyItem[]>("/api/v1/dashboard/youtube-keys", signal),
-    safeFetchJson<any>("/api/v1/dashboard/moderation?status_filter=PENDING", signal),
+    safeFetchJson<unknown>("/api/v1/dashboard/moderation?status_filter=PENDING", signal),
     safeFetchJson<IncidentItem[]>("/api/v1/dashboard/incidents", signal),
   ]);
 
   // Normalize streams: ensure session_id and duration_seconds exist
-  const rawStreams = Array.isArray(stRes.data) ? stRes.data : [];
-  const normalizedStreams: StreamItem[] = rawStreams.map((s) => ({
-    id: s.id || s.session_id,
-    session_id: s.session_id || s.id,
-    creator_id: s.creator_id || "",
-    channel_name: s.channel_name || "Live Channel",
-    youtube_video_id: s.youtube_video_id || "",
-    youtube_live_chat_id: s.youtube_live_chat_id || "",
-    status: s.status || "UNKNOWN",
-    is_worker_alive: s.is_worker_alive ?? false,
-    messages_processed: s.messages_processed ?? 0,
-    duration_minutes: s.duration_minutes ?? 0,
-    duration_seconds: s.duration_seconds ?? Math.round((s.duration_minutes || 0) * 60),
-    started_at: s.started_at || null,
-    ended_at: s.ended_at || null,
-    last_activity_at: s.last_activity_at || s.started_at || null,
-  }));
+  const rawStreams = Array.isArray(stRes.data) ? stRes.data.filter(isRecord) : [];
+  const normalizedStreams: StreamItem[] = rawStreams.map((s) => {
+    const durationMinutes = asNumber(s.duration_minutes);
+    const sessionId = asString(s.session_id, asString(s.id));
+    return {
+      id: asString(s.id, sessionId), session_id: sessionId,
+      creator_id: asString(s.creator_id), channel_name: asString(s.channel_name, "Live channel"),
+      youtube_video_id: asString(s.youtube_video_id), youtube_live_chat_id: asString(s.youtube_live_chat_id),
+      status: asString(s.status, "UNKNOWN"), is_worker_alive: s.is_worker_alive === true,
+      messages_processed: asNumber(s.messages_processed), duration_minutes: durationMinutes,
+      duration_seconds: asNumber(s.duration_seconds, Math.round(durationMinutes * 60)),
+      started_at: typeof s.started_at === "string" ? s.started_at : null,
+      ended_at: typeof s.ended_at === "string" ? s.ended_at : null,
+      last_activity_at: asString(s.last_activity_at, typeof s.started_at === "string" ? s.started_at : "") || null,
+    };
+  });
 
   // Normalize moderation reviews: support both direct array or `{ items: [...] }`
-  let rawReviews: any[] = [];
+  let rawReviews: UnknownRecord[] = [];
   if (Array.isArray(mRes.data)) {
-    rawReviews = mRes.data;
-  } else if (mRes.data && Array.isArray(mRes.data.items)) {
-    rawReviews = mRes.data.items;
+    rawReviews = mRes.data.filter(isRecord);
+  } else if (isRecord(mRes.data) && Array.isArray(mRes.data.items)) {
+    rawReviews = mRes.data.items.filter(isRecord);
   }
 
   const normalizedReviews: ReviewItem[] = rawReviews.map((r) => ({
-    id: r.id,
-    creator_id: r.creator_id || "",
-    stream_session_id: r.stream_session_id,
-    viewer_name: r.viewer_name,
-    author_display_name: r.author_display_name || r.viewer_name || "Viewer",
-    flagged_content: r.flagged_content,
-    message_text: r.message_text || r.flagged_content || "",
-    flagged_reason: r.flagged_reason,
-    reason: r.reason || r.flagged_reason || "Automated violation",
-    confidence_score: r.confidence_score,
-    confidence: r.confidence ?? (r.confidence_score ? Math.round(r.confidence_score * 100) : 90),
-    severity: r.severity ?? (r.confidence_score ? Math.round(r.confidence_score * 100) : 50),
-    recommended_action: r.recommended_action || "TIMEOUT",
-    status: r.status || "PENDING",
-    created_at: r.created_at || new Date().toISOString(),
+    id: asString(r.id), creator_id: asString(r.creator_id), stream_session_id: asString(r.stream_session_id) || undefined,
+    viewer_name: asString(r.viewer_name) || undefined,
+    author_display_name: asString(r.author_display_name, asString(r.viewer_name, "Viewer")),
+    flagged_content: asString(r.flagged_content) || undefined,
+    message_text: asString(r.message_text, asString(r.flagged_content)),
+    flagged_reason: asString(r.flagged_reason) || undefined,
+    reason: asString(r.reason, asString(r.flagged_reason, "Automated violation")),
+    confidence_score: typeof r.confidence_score === "number" ? r.confidence_score : undefined,
+    confidence: asNumber(r.confidence, typeof r.confidence_score === "number" ? Math.round(r.confidence_score * 100) : 90),
+    severity: asNumber(r.severity, typeof r.confidence_score === "number" ? Math.round(r.confidence_score * 100) : 50),
+    recommended_action: asString(r.recommended_action, "TIMEOUT"), status: asString(r.status, "PENDING"),
+    created_at: asString(r.created_at, new Date().toISOString()),
   }));
 
   // Normalize quota
@@ -265,7 +275,7 @@ export async function sendStreamControlAction(streamId: string, action: string):
   return res.ok;
 }
 
-export async function sendManualConnect(urlOrVideoId: string): Promise<any> {
+export async function sendManualConnect(urlOrVideoId: string): Promise<{ status: string; stream_session_id: string }> {
   const res = await fetch("/api/v1/dashboard/streams/manual-connect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -282,7 +292,11 @@ export async function sendManualConnect(urlOrVideoId: string): Promise<any> {
     }
     throw new Error(errMessage);
   }
-  return res.json();
+  const payload: unknown = await res.json();
+  if (!isRecord(payload) || typeof payload.status !== "string" || typeof payload.stream_session_id !== "string") {
+    throw new Error("The service returned an invalid connection response.");
+  }
+  return { status: payload.status, stream_session_id: payload.stream_session_id };
 }
 
 export async function sendResetKeyCooldown(keyIndex: number): Promise<boolean> {

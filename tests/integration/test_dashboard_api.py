@@ -109,7 +109,8 @@ async def test_dashboard_full_flow(api_client: AsyncClient, db_session: AsyncSes
     res = await api_client.get("/api/v1/dashboard/bot-auth", headers=headers)
     assert res.status_code == 200
     assert res.json()["is_authenticated"] is True
-    assert "ya29." in res.json()["token_preview"]
+    assert "token_preview" not in res.json()
+    assert "ya29.test_access_token_12345" not in res.text
 
     # 15. Clear Bot Token
     res = await api_client.delete("/api/v1/dashboard/bot-auth", headers=headers)

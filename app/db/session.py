@@ -1,7 +1,9 @@
 """SQLAlchemy async engine and session management."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 
+from alembic.config import Config
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -9,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from alembic import command
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import Base
@@ -76,11 +79,6 @@ async def init_db_engine() -> None:
 
     # 1. Run Alembic migrations automatically on startup
     try:
-        import asyncio
-
-        from alembic.config import Config
-        from alembic import command
-
         def _upgrade() -> None:
             alembic_cfg = Config("alembic.ini", attributes={"configure_logger": False})
             try:
@@ -90,19 +88,15 @@ async def init_db_engine() -> None:
             except Exception as e:
                 err_msg = str(e)
                 _schema_init_log.append(f"alembic upgrade warning: {err_msg}")
-                logger.warning(f"Alembic auto-migration note: {err_msg}")
-                if "002_add_join_message_sent" in err_msg or "Can't locate revision" in err_msg:
-                    try:
-                        command.stamp(alembic_cfg, "head")
-                        _schema_init_log.append("alembic: stamped to head after foreign revision detected")
-                        logger.info("Alembic schema stamped to head successfully")
-                    except Exception as stamp_err:
-                        _schema_init_log.append(f"alembic stamp error: {stamp_err}")
+                logger.warning("Alembic auto-migration failed: %s", err_msg)
+                raise
 
         await asyncio.to_thread(_upgrade)
     except Exception as mig_err:
         _schema_init_log.append(f"alembic thread error: {mig_err}")
-        logger.warning(f"Alembic auto-migration thread warning: {mig_err}")
+        logger.warning("Alembic auto-migration thread failed: %s", mig_err)
+        if settings.is_production:
+            raise
 
     # 2. Schema guarantee: Ensure all Base.metadata tables exist across all environments
     import app.db.models  # noqa: F401

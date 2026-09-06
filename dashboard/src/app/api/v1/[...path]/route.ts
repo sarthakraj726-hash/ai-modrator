@@ -34,13 +34,13 @@ function getBackendBaseUrl(): string {
 }
 
 function getAdminSecret(): string {
-  // Server-side only: never exposed via NEXT_PUBLIC_* in production
-  const secret = process.env.ADMIN_SECRET || process.env.NEXT_PUBLIC_ADMIN_SECRET;
+  // This is deliberately server-only. A NEXT_PUBLIC_ value is compiled into the
+  // browser bundle and must never be accepted as privileged authentication.
+  const secret = process.env.ADMIN_SECRET;
   if (secret && secret.trim()) {
     return secret.trim();
   }
-  // Safe development fallback
-  return "dev-admin-secret-replace-in-production";
+  return "";
 }
 
 async function proxyRequest(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
@@ -53,15 +53,21 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
   const backendBase = getBackendBaseUrl();
   const targetUrl = `${backendBase}/api/v1/${subpath}${request.nextUrl.search}`;
   const adminSecret = getAdminSecret();
+  if (!adminSecret) {
+    console.error(`[API Proxy] ADMIN_SECRET is not configured for ${request.method} /api/v1/${subpath}`);
+    return NextResponse.json(
+      { error: "ServiceMisconfigured", message: "The service is temporarily unavailable." },
+      { status: 503 },
+    );
+  }
 
-  // Forward client headers while stripping hop-by-hop headers
+  // Allowlist request headers instead of forwarding browser credentials, host
+  // metadata, tracing headers, or client-provided admin credentials upstream.
   const forwardHeaders = new Headers();
-  request.headers.forEach((val, key) => {
-    const lower = key.toLowerCase();
-    if (lower !== "host" && lower !== "connection" && lower !== "content-length") {
-      forwardHeaders.set(key, val);
-    }
-  });
+  for (const header of ["accept", "content-type", "if-none-match"]) {
+    const value = request.headers.get(header);
+    if (value) forwardHeaders.set(header, value);
+  }
 
   // Inject server-side admin credentials for FastAPI verification
   forwardHeaders.set("X-Admin-Secret", adminSecret);
@@ -93,7 +99,7 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
 
     // Diagnostic logging without leaking secrets or tokens
     if (backendRes.status === 404) {
-      console.warn(`[API Proxy 404 Not Found] Upstream target URL was: ${targetUrl}`);
+      console.warn(`[API Proxy 404] ${request.method} /api/v1/${subpath}`);
     } else {
       console.log(`[API Proxy] ${request.method} /api/v1/${subpath} -> ${backendRes.status} (${duration}ms)`);
     }
@@ -101,7 +107,7 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
     const resHeaders = new Headers();
     backendRes.headers.forEach((val, key) => {
       const lower = key.toLowerCase();
-      if (lower !== "transfer-encoding" && lower !== "content-encoding") {
+      if (["content-type", "cache-control", "etag", "last-modified"].includes(lower)) {
         resHeaders.set(key, val);
       }
     });
@@ -116,8 +122,8 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
     const duration = Date.now() - start;
     const isTimeout = err instanceof Error && err.name === "AbortError";
     const errorMessage = isTimeout
-      ? "Gateway Timeout: Backend request exceeded 12000ms"
-      : `Backend Connection Failed: Unable to reach backend service at ${backendBase}`;
+      ? "The service took too long to respond. Please try again."
+      : "The service is temporarily unavailable. Please try again.";
 
     console.error(`[API Proxy Error] ${request.method} /api/v1/${subpath} failed after ${duration}ms:`, isTimeout ? "Timeout" : "Connection Refused");
 
@@ -125,9 +131,6 @@ async function proxyRequest(request: NextRequest, context: { params: Promise<{ p
       {
         error: isTimeout ? "GatewayTimeout" : "BackendUnavailable",
         message: errorMessage,
-        path: `/api/v1/${subpath}`,
-        backend_url: backendBase,
-        status: isTimeout ? 504 : 503,
       },
       { status: isTimeout ? 504 : 503 }
     );

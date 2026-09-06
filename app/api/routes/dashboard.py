@@ -403,12 +403,12 @@ async def manual_connect_stream(
         ) from e
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Manual connect unexpected error: {e}")
+    except Exception as exc:
+        logger.exception("Manual connect failed unexpectedly")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to connect stream: {e}",
-        ) from e
+            detail="Unable to connect the stream. Please try again.",
+        ) from exc
 
 
 # --- 2b. YouTube Bot OAuth Authorization & Live Chat Testing ---
@@ -429,13 +429,8 @@ async def get_bot_auth_status(admin: AdminUserDep) -> dict[str, Any]:
     )
     has_static = bool(settings.YOUTUBE_OAUTH_TOKEN)
 
-    token_preview = None
-    if token and len(token) > 10:
-        token_preview = f"{token[:6]}...{token[-4:]}"
-
     return {
         "is_authenticated": is_auth,
-        "token_preview": token_preview,
         "has_refresh_token": has_refresh,
         "has_env_token": has_static,
         "auth_source": "refresh_token" if has_refresh else ("env_token" if has_static else ("redis_token" if is_auth else "none")),

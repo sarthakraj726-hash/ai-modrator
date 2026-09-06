@@ -786,7 +786,7 @@ def render_control_center_html(environment: str, version: str) -> str:
           if (data.is_authenticated) {{
             if (bBadge) {{
               bBadge.className = "badge badge-ok";
-              bBadge.textContent = "AUTHENTICATED (" + (data.token_preview || "OAUTH") + ")";
+              bBadge.textContent = "AUTHENTICATED (OAUTH)";
             }}
             if (sMsg) {{
               sMsg.style.borderColor = "rgba(16, 185, 129, 0.4)";
