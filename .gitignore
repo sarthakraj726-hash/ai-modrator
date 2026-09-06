@@ -39,6 +39,7 @@ env/
 htmlcov/
 .tox/
 .nox/
+.pydeps/
 coverage.xml
 *.cover
 *.py,cover

@@ -89,6 +89,7 @@ class StreamWorkerSession:
         self.last_error: str | None = None
 
         self._task: asyncio.Task[None] | None = None
+        self._join_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._lock = asyncio.Lock()
 
@@ -149,6 +150,13 @@ class StreamWorkerSession:
                         f"Error during worker task shutdown for session {self.session_id}: {e}"
                     )
 
+            if self._join_task and not self._join_task.done():
+                self._join_task.cancel()
+                try:
+                    await self._join_task
+                except asyncio.CancelledError:
+                    pass
+
             if self.state != WorkerState.ENDED:
                 self.state = WorkerState.STOPPED
             self.stopped_at = datetime.now(UTC)
@@ -200,8 +208,12 @@ class StreamWorkerSession:
             await self.chat_transport.connect()
             self.state = WorkerState.RUNNING
 
-            # Post introductory join message to live chat
-            await self._send_join_message()
+            # Chat ingestion must not wait for a best-effort OAuth write. A
+            # slow/failed greeting previously delayed every stream's first
+            # message batch (and could delay it through retries).
+            self._join_task = asyncio.create_task(
+                self._send_join_message(), name=f"stream-join-message-{self.session_id}"
+            )
 
             await event_bus.publish(
                 StreamStartedEvent(
@@ -314,6 +326,12 @@ class StreamWorkerSession:
                 )
             )
         finally:
+            if self._join_task and not self._join_task.done():
+                self._join_task.cancel()
+                try:
+                    await self._join_task
+                except asyncio.CancelledError:
+                    pass
             if self.state not in (WorkerState.ERROR, WorkerState.STOPPED, WorkerState.ENDED):
                 self.state = WorkerState.STOPPED
             self.stopped_at = datetime.now(UTC)

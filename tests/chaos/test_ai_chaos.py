@@ -20,7 +20,7 @@ from tests.fake_openrouter_server import FakeOpenRouterProvider
 @pytest.mark.asyncio
 class TestAIChaosAndFaults:
     async def test_openrouter_outage_graceful_fallback(self):
-        """When OpenRouter completely fails with 500 errors, moderation falls back safely to ALLOW without crashing."""
+        """Provider failure must preserve safety by routing ambiguous content to human review."""
         fake_ai = FakeOpenRouterProvider()
         fake_ai.set_injected_exception(ExternalServiceError("OpenRouter 500 Internal Server Error"))
 
@@ -36,8 +36,9 @@ class TestAIChaosAndFaults:
 
         # Must not raise unhandled exception!
         decision = await engine.evaluate_message(creator_id="c1", message=msg)
-        assert decision.action == ModerationAction.ALLOW
-        assert "error" in decision.reason.lower() or "safe" in decision.reason.lower()
+        assert decision.action == ModerationAction.FLAG_FOR_REVIEW
+        assert decision.requires_human_review is True
+        assert "unavailable" in decision.reason.lower()
 
     async def test_concurrent_moderator_review_race_condition(self):
         """Two moderators approve/deny the same review simultaneously; exactly one transition succeeds."""

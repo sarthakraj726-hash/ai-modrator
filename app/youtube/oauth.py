@@ -1,7 +1,7 @@
 """YouTube OAuth Token Management supporting static access tokens and auto-refresh."""
 
 import time
-from typing import Any
+
 import httpx
 
 from app.cache.redis import RedisClient, get_redis_sync

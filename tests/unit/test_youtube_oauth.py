@@ -1,7 +1,8 @@
 """Unit tests for YouTube OAuth token management and KeyPool OAuth error protection."""
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from app.youtube.key_pool import ApiKeyPool, KeyStatus
 from app.youtube.oauth import YouTubeOAuthManager

@@ -36,6 +36,14 @@ class SingleFlightCoalescer:
                 future = self._in_flight[key]
             else:
                 future = loop.create_future()
+                # The leader raises failures directly. If no follower joined the
+                # flight, mark the mirrored Future exception as observed so
+                # asyncio does not emit an unhandled-future warning later.
+                future.add_done_callback(
+                    lambda completed: completed.exception()
+                    if not completed.cancelled()
+                    else None
+                )
                 self._in_flight[key] = future
                 is_leader = True
 

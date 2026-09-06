@@ -42,6 +42,13 @@ class AIRequestCoalescer:
                 future = self._in_flight[key]
             else:
                 future = loop.create_future()
+                # The leader raises failures directly. With no followers this
+                # mirrored Future would otherwise report an unobserved exception.
+                future.add_done_callback(
+                    lambda completed: completed.exception()
+                    if not completed.cancelled()
+                    else None
+                )
                 self._in_flight[key] = future
                 is_leader = True
 

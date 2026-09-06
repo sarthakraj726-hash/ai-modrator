@@ -40,6 +40,21 @@ async def test_single_flight_coalescing():
 
 
 @pytest.mark.asyncio
+async def test_single_flight_leader_failure_is_not_left_unobserved():
+    """A failed leader without followers must not leave an asyncio warning future."""
+    coalescer = SingleFlightCoalescer()
+
+    async def fail():
+        raise TimeoutError("provider unavailable")
+
+    with pytest.raises(TimeoutError):
+        await coalescer.execute("failing-resource", fail)
+
+    await asyncio.sleep(0)
+    assert "failing-resource" not in coalescer._in_flight
+
+
+@pytest.mark.asyncio
 async def test_broadcast_resolver_with_fake_server():
     server = FakeYouTubeServer()
     server.register_video(
